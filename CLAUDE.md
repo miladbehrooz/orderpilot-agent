@@ -65,6 +65,10 @@ uv run mypy                               # type check (strict)
 uv run pytest                             # tests
 ```
 
+## Coding style
+- Google-style docstrings (`Args:`, `Returns:`, `Yields:`, `Raises:`) on **every** function and class, including private `_helpers` and tests. Ruff (`D` rules, `convention = "google"`) enforces this for public ones only, so write the private ones by hand.
+- Type hints everywhere; `mypy --strict` and `ruff check` / `ruff format` must pass.
+
 ## Working style
 - Build in small steps; tools and policy first, with unit tests against the real database, then the graph, then evals.
 - Unit tests for tools must not call an LLM.

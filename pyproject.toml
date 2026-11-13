@@ -56,7 +56,17 @@ select = [
     "BLE",  # no blind `except Exception`
     "S110", # no try/except/pass
     "S112", # no try/except/continue
+    "D",    # docstrings (Google style, see below)
 ]
+ignore = [
+    "D100", # module docstring: optional
+    "D104", # package docstring: optional
+    "D105", # magic methods (__repr__ etc.): optional
+    "D107", # __init__: document args in the class docstring instead
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
 
 [tool.ruff.lint.flake8-bandit]
 check-typed-exception = true
