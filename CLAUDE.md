@@ -59,6 +59,7 @@ orderpilot-agent/
 ```bash
 uv sync                                   # install deps (dev + data groups by default)
 cp sample.env .env                        # then fill in keys
+uv run pre-commit install                 # git hook: ruff, ruff format, mypy, file checks
 uv run python scripts/build_db.py --data-dir data --out ecommerce.sqlite --today 2026-11-12
 uv run ruff check . && uv run ruff format .   # lint + format
 uv run mypy                               # type check (strict)
