@@ -218,3 +218,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# OrderPilot
+data/
+*.sqlite
+*.sqlite3
+.DS_Store
