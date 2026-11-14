@@ -17,7 +17,7 @@ from typing import Literal, TypeAlias
 from langchain.tools import BaseTool
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, AnyMessage, SystemMessage
-from langgraph.graph import END, START, StateGraph
+from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode
 from langgraph.prebuilt.tool_node import ToolInvocationError
@@ -30,7 +30,7 @@ from orderpilot.services.results import ReasonCode, ToolResult
 from orderpilot.settings import settings
 from orderpilot.tools import VERIFY_TOOL_NAME
 
-AgentGraph: TypeAlias = CompiledStateGraph[AgentState, None, AgentState, AgentState]
+AgentGraph: TypeAlias = CompiledStateGraph[AgentState, None, MessagesState, AgentState]
 MessagesUpdate: TypeAlias = dict[str, list[AnyMessage]]
 
 
@@ -131,9 +131,11 @@ def build_graph(
         tools: Every tool the agent may use. Must include ``verify_customer``.
         system_prompt: Rendered system prompt.
         checkpointer: Optional checkpointer for multi-turn conversations (``thread_id``).
+            Leave it unset under the LangGraph server, which provides persistence.
 
     Returns:
         The compiled graph, limited to ``settings.AGENT_RECURSION_LIMIT`` steps per run.
+        Its input accepts only ``messages`` (rule 2).
 
     Raises:
         ValueError: If no tool is named ``verify_customer``.
@@ -157,7 +159,9 @@ def build_graph(
         response = runnable.invoke([system, *state["messages"]])
         return {"messages": [response]}
 
-    builder = StateGraph(AgentState)
+    # Callers (including the LangGraph server API and Studio) may only send messages.
+    # Other input keys are dropped, so user_id can only ever be set by verify_customer.
+    builder = StateGraph(AgentState, input_schema=MessagesState)
     builder.add_node("agent", agent, retry_policy=RetryPolicy(max_attempts=3))
     # ToolNode holds every tool, so a call to a tool that wasn't bound still reaches that
     # tool's own guard instead of failing silently.

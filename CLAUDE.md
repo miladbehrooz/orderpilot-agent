@@ -48,6 +48,7 @@ orderpilot-agent/
 ├── src/orderpilot/
 │   ├── settings.py       # Settings: policy values, DB path, LLM settings, log level
 │   ├── app.py            # composition root: repo -> tools, model, prompt -> graph
+│   ├── server.py         # `graph` for `langgraph dev` (langgraph.json)
 │   ├── llm.py            # LLMFactory (provider registry: openai, anthropic)
 │   ├── domain.py         # plain dataclasses (User, later Order, OrderItem)
 │   ├── db.py             # SQLite connection, timestamp parsing
@@ -69,6 +70,8 @@ uv run python scripts/build_db.py --data-dir data --out ecommerce.sqlite --today
 uv run ruff check . && uv run ruff format .   # lint + format
 uv run mypy                               # type check (strict)
 uv run pytest                             # tests
+uv run langgraph dev                      # local agent server + Studio (see README)
+uv run python -m orderpilot               # terminal chat with the agent
 ```
 
 ## Coding style

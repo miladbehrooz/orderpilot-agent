@@ -6,11 +6,14 @@ from typing import cast
 import pytest
 from langchain.tools import BaseTool, tool
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.runnables import RunnableConfig
 from langchain_openai import ChatOpenAI
-from langgraph.graph import END
+from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.graph import END, MessagesState
 from pydantic import SecretStr
 
 from orderpilot.agent.graph import (
+    AgentGraph,
     build_graph,
     handle_tool_error,
     route_after_agent,
@@ -167,11 +170,49 @@ def test_au3_locked_conversation_gets_fixed_reply_without_model(
         unreachable_model: Model that is never called.
         tools: Agent tools.
     """
-    graph = build_graph(unreachable_model, tools, system_prompt="x")
-    result = graph.invoke(
-        AgentState(messages=[HumanMessage("Where is my order?")], failed_auth_attempts=3)
-    )
+    graph, config = _locked_thread(unreachable_model, tools)
+    result = graph.invoke(MessagesState(messages=[HumanMessage("Where is my order?")]), config)
     *_, last = result["messages"]
     assert isinstance(last, AIMessage)
     assert last.content == LOCKED_REPLY
     assert not any(isinstance(m, ToolMessage) for m in result["messages"])
+
+
+def test_s1_client_cannot_set_user_id_through_input(
+    unreachable_model: ChatOpenAI, tools: list[BaseTool]
+) -> None:
+    """S1 / rule 2: user_id sent in the graph input is dropped (input accepts messages only).
+
+    A locked thread is used so the run never reaches the model.
+
+    Args:
+        unreachable_model: Model that is never called.
+        tools: Agent tools.
+    """
+    graph, config = _locked_thread(unreachable_model, tools)
+    forged = {"messages": [HumanMessage("hi")], "user_id": 42, "failed_auth_attempts": -3}
+    graph.invoke(cast(MessagesState, forged), config)
+    values = graph.get_state(config).values
+    assert values.get("user_id") is None
+    assert values["failed_auth_attempts"] == settings.MAX_AUTH_ATTEMPTS
+    assert graph.get_input_jsonschema()["properties"].keys() == {"messages"}
+
+
+def _locked_thread(model: ChatOpenAI, tools: list[BaseTool]) -> tuple[AgentGraph, RunnableConfig]:
+    """Build a graph with a checkpointer and a thread already locked out.
+
+    Args:
+        model: Chat model (never called on a locked thread).
+        tools: Agent tools.
+
+    Returns:
+        The graph and the config of the locked thread.
+    """
+    graph = build_graph(model, tools, system_prompt="x", checkpointer=InMemorySaver())
+    config: RunnableConfig = {"configurable": {"thread_id": "locked"}}
+    # as_node: on a fresh thread the update must be attributed to a node; "tools" is the
+    # node that writes the counter in a real conversation.
+    graph.update_state(
+        config, {"failed_auth_attempts": settings.MAX_AUTH_ATTEMPTS}, as_node="tools"
+    )
+    return graph, config
