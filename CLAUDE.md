@@ -21,7 +21,7 @@ If code and docs disagree, ask before changing either.
 3. **Auth gate:** before `verify_customer` succeeds, only that tool is bound to the model, and every other tool also refuses with `NOT_VERIFIED`.
 4. **Another user's order returns `NOT_FOUND`**, the same as a non-existent order.
 5. **`TODAY` comes from `meta.reference_now`** in the database. Never use `datetime.now()` in tools or evals.
-6. **Policy constants in one config module:** `RETURN_WINDOW_DAYS=30`, `STUCK_DAYS=7`, `LOST_DAYS=14`, `MAX_AUTH_ATTEMPTS=3`.
+6. **Policy values in one place, `Settings` (`src/orderpilot/settings.py`):** `RETURN_WINDOW_DAYS=30`, `STUCK_DAYS=7`, `LOST_DAYS=14`, `MAX_AUTH_ATTEMPTS=3`.
 7. **Write tools re-check eligibility themselves** before writing.
 8. **Every scenario ID** (e.g. `P4`, `S1`) maps to eval test cases; keep the IDs in test names.
 9. **Tool-call errors are returned as structured results**, not raised to the LLM as stack traces.
@@ -46,7 +46,7 @@ orderpilot-agent/
 ├── scripts/build_db.py   # CSV -> ecommerce.sqlite
 ├── data/                 # CSVs, git-ignored
 ├── src/orderpilot/
-│   ├── config.py         # policy constants, DB path
+│   ├── settings.py       # Settings: policy values, DB path, log level
 │   ├── db.py             # connection, reference_now
 │   ├── tools/            # one module per tool group
 │   ├── agent/            # graph, state, prompts
@@ -69,6 +69,14 @@ uv run pytest                             # tests
 ## Coding style
 - Google-style docstrings (`Args:`, `Returns:`, `Yields:`, `Raises:`) on **every** function and class, including private `_helpers` and tests. Ruff (`D` rules, `convention = "google"`) enforces this for public ones only, so write the private ones by hand.
 - Type hints everywhere; `mypy --strict` and `ruff check` / `ruff format` must pass.
+- **No unnecessary module-level constants.** Before adding an `UPPER_CASE = ...` global, use the first option that fits:
+  1. **A local variable** if only one function uses the value (e.g. `week = pd.Timedelta(weeks=1)` inside `shift_dates`).
+  2. **Derive it** from an existing source of truth instead of repeating it (e.g. read column lists from the SQLite schema with `PRAGMA table_info`, not a hand-written list).
+  3. **A field on `Settings`** for runtime configuration or business policy (e.g. `RETURN_WINDOW_DAYS`, `LOG_LEVEL`).
+  4. **A frozen dataclass config** created by a `default_config()` function and passed in explicitly, for fixed structural settings of a script or module (see `BuildConfig` in `scripts/build_db.py`).
+  5. **A pytest fixture** for test data (e.g. `today`), not a module-level `TODAY = ...`.
+- Pass configuration in as arguments; functions must not read module globals for settings.
+- Exceptions: `settings.py` (e.g. `PROJECT_ROOT`), `__all__`, `__version__`, type aliases, and the `logger`/`settings` singletons.
 
 ## Testing
 - pytest with **pytest-mock**: use the `mocker` fixture (typed as `pytest_mock.MockerFixture`). Don't import `unittest.mock` directly or use `monkeypatch` for patching.
