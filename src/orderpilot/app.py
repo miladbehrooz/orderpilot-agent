@@ -4,6 +4,8 @@ This is the only module that knows about every layer. Evals can pass their own
 repository (e.g. one on a fresh database copy) and checkpointer.
 """
 
+from typing import Any
+
 from langgraph.types import Checkpointer
 
 from orderpilot.agent.graph import AgentGraph, build_graph
@@ -34,11 +36,10 @@ def build_agent(
     if settings.LLM_PROVIDER is None or settings.LLM_MODEL is None:
         raise LLMConfigError("Set LLM_PROVIDER and LLM_MODEL in .env")
     repo = repo or SqliteOrderRepository(settings.DB_PATH)
-    model = LLMFactory.build(
-        settings.LLM_PROVIDER,
-        model_name=settings.LLM_MODEL,
-        temperature=settings.LLM_TEMPERATURE,
-    )
+    options: dict[str, Any] = {}
+    if settings.LLM_TEMPERATURE is not None:  # current Claude models reject temperature
+        options["temperature"] = settings.LLM_TEMPERATURE
+    model = LLMFactory.build(settings.LLM_PROVIDER, model_name=settings.LLM_MODEL, **options)
     return build_graph(
         model,
         build_tools(repo),

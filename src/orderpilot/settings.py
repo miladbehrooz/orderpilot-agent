@@ -29,7 +29,9 @@ class Settings(BaseSettings):
         LLM_PROVIDER: Provider of the agent's chat model. ``None`` until chosen; building
             the agent then fails with a clear error.
         LLM_MODEL: Model name passed to the provider, e.g. ``gpt-...`` or ``claude-...``.
-        LLM_TEMPERATURE: Sampling temperature of the agent's chat model.
+        LLM_TEMPERATURE: Sampling temperature of the agent's chat model. ``None`` (the
+            default) sends no temperature, which current Claude models require: they
+            reject the parameter.
         AGENT_RECURSION_LIMIT: Maximum graph steps per agent run, so a looping model stops.
         RETURN_WINDOW_DAYS: Days after delivery during which an order can be returned.
         STUCK_DAYS: Days an order can stay in Processing before it counts as stuck.
@@ -55,7 +57,7 @@ class Settings(BaseSettings):
 
     LLM_PROVIDER: ProviderName | None = None
     LLM_MODEL: str | None = None
-    LLM_TEMPERATURE: float = 0.0
+    LLM_TEMPERATURE: float | None = None
     AGENT_RECURSION_LIMIT: int = 25
 
     RETURN_WINDOW_DAYS: int = 30
