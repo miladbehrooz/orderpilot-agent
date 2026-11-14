@@ -3,11 +3,12 @@
 import hashlib
 import sqlite3
 from collections.abc import Callable
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import pandas as pd
 import pytest
+from pytest_mock import MockerFixture
 
 import build_db
 from build_db import BuildError, build, main, parse_args
@@ -194,34 +195,66 @@ def test_malformed_email_raises(
 
 
 def test_validation_failure_keeps_previous_database(
-    tables: dict[str, pd.DataFrame], write_csvs: WriteCsvs, tmp_path: Path
+    tables: dict[str, pd.DataFrame],
+    write_csvs: WriteCsvs,
+    tmp_path: Path,
+    mocker: MockerFixture,
 ) -> None:
     """A failed validation leaves the existing database untouched and keeps a .failed copy."""
     out = tmp_path / "ecommerce.sqlite"
     build(write_csvs(tables), out, TODAY, seed=42)
     before = _sha256(out)
 
+    validate_spy = mocker.spy(build_db, "validate")
     tables["orders"].loc[0, "num_of_item"] = 2  # passes source checks, fails validation
     with pytest.raises(BuildError, match="item count mismatch"):
         build(write_csvs(tables), out, TODAY, seed=42)
 
+    validate_spy.assert_called_once_with(tmp_path / "ecommerce.sqlite.tmp")  # never `out`
+    assert validate_spy.spy_return == ["item count mismatch"]
     assert _sha256(out) == before
     assert (tmp_path / "ecommerce.sqlite.failed").is_file()
     assert not (tmp_path / "ecommerce.sqlite.tmp").exists()
 
 
-def test_write_error_removes_temp_file(
+def test_sqlite_error_is_reported_and_temp_file_removed(
     tables: dict[str, pd.DataFrame],
     write_csvs: WriteCsvs,
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    mocker: MockerFixture,
 ) -> None:
-    """A SQLite error during the write names the step and leaves no temp file behind."""
-    monkeypatch.setattr(build_db, "SCHEMA", "THIS IS NOT SQL;")
+    """A SQLite error during the write becomes a BuildError naming the step."""
+    # Patch where build_db looks it up.
+    mocker.patch("build_db.sqlite3.connect", side_effect=sqlite3.OperationalError("disk I/O error"))
     out = tmp_path / "ecommerce.sqlite"
-    with pytest.raises(BuildError, match="Failed writing schema"):
+    with pytest.raises(BuildError, match=r"Failed writing schema .*: disk I/O error"):
         build(write_csvs(tables), out, TODAY, seed=42)
     assert not out.exists()
+    assert not (tmp_path / "ecommerce.sqlite.tmp").exists()
+
+
+def test_interrupt_removes_temp_file_and_keeps_database(
+    tables: dict[str, pd.DataFrame],
+    write_csvs: WriteCsvs,
+    tmp_path: Path,
+    mocker: MockerFixture,
+) -> None:
+    """Ctrl-C during the write exits with 130, removes the temp file and keeps the old DB."""
+    data_dir = write_csvs(tables)
+    out = tmp_path / "ecommerce.sqlite"
+    build(data_dir, out, TODAY, seed=42)
+    before = _sha256(out)
+
+    def interrupted_write(dfs: object, path: Path, meta: object) -> None:
+        """Leave a partial file behind, then simulate Ctrl-C."""
+        path.write_bytes(b"partial")
+        raise KeyboardInterrupt
+
+    mocker.patch.object(build_db, "write", autospec=True, side_effect=interrupted_write)
+    args = ["--data-dir", str(data_dir), "--out", str(out), "--today", TODAY.isoformat()]
+
+    assert main(args) == 130
+    assert _sha256(out) == before
     assert not (tmp_path / "ecommerce.sqlite.tmp").exists()
 
 
@@ -233,16 +266,38 @@ def test_invalid_today_is_rejected(capsys: pytest.CaptureFixture[str]) -> None:
     assert "expected YYYY-MM-DD" in capsys.readouterr().err
 
 
-def test_main_returns_1_on_build_error(tmp_path: Path) -> None:
+# --------------------------------------------------------------------------- main()
+# These tests check main() on its own, so build() is replaced by a mock.
+
+
+def test_main_passes_arguments_to_build(mocker: MockerFixture) -> None:
+    """main() parses the CLI arguments, calls build() with them and returns 0."""
+    mock_build = mocker.patch.object(build_db, "build", autospec=True)
+    code = main(["--data-dir", "d", "--out", "o.sqlite", "--today", "2026-11-12", "--seed", "7"])
+    assert code == 0
+    mock_build.assert_called_once_with(Path("d"), Path("o.sqlite"), date(2026, 11, 12), 7)
+
+
+def test_main_defaults_today_to_current_utc_date(mocker: MockerFixture) -> None:
+    """Without --today, main() uses the current UTC date (the clock is mocked)."""
+    mock_build = mocker.patch.object(build_db, "build", autospec=True)
+    mock_datetime = mocker.patch.object(build_db, "datetime", autospec=True)
+    mock_datetime.now.return_value = datetime(2030, 1, 2, 23, 59, tzinfo=UTC)
+
+    assert main([]) == 0
+    mock_datetime.now.assert_called_once_with(UTC)
+    assert mock_build.call_args.args[2] == date(2030, 1, 2)
+
+
+def test_main_returns_1_on_build_error(mocker: MockerFixture) -> None:
     """main() turns a BuildError into exit code 1 instead of a traceback."""
-    code = main(["--data-dir", str(tmp_path / "nope"), "--out", str(tmp_path / "db.sqlite")])
-    assert code == 1
+    mocker.patch.object(build_db, "build", autospec=True, side_effect=BuildError("boom"))
+    assert main([]) == 1
 
 
-def test_main_returns_0_on_success(
-    tables: dict[str, pd.DataFrame], write_csvs: WriteCsvs, tmp_path: Path
-) -> None:
-    """main() returns 0 after a successful build."""
-    data_dir = write_csvs(tables)
-    args = ["--data-dir", str(data_dir), "--out", str(tmp_path / "db.sqlite")]
-    assert main([*args, "--today", TODAY.isoformat()]) == 0
+def test_main_exits_1_on_unexpected_error(mocker: MockerFixture) -> None:
+    """An unexpected exception is caught by logger.catch and exits with code 1."""
+    mocker.patch.object(build_db, "build", autospec=True, side_effect=RuntimeError("bug"))
+    with pytest.raises(SystemExit) as exc:
+        main([])
+    assert exc.value.code == 1

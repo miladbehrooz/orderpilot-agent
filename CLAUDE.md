@@ -52,7 +52,7 @@ orderpilot-agent/
 │   ├── agent/            # graph, state, prompts
 │   └── policy.py         # eligibility logic shared by read and write tools
 ├── evals/                # scenario generators, user simulator, graders
-└── tests/                # unit tests for tools and policy (no LLM)
+└── tests/                # pytest + pytest-mock unit tests (no real LLM calls)
 ```
 
 ## Commands
@@ -70,7 +70,17 @@ uv run pytest                             # tests
 - Google-style docstrings (`Args:`, `Returns:`, `Yields:`, `Raises:`) on **every** function and class, including private `_helpers` and tests. Ruff (`D` rules, `convention = "google"`) enforces this for public ones only, so write the private ones by hand.
 - Type hints everywhere; `mypy --strict` and `ruff check` / `ruff format` must pass.
 
+## Testing
+- pytest with **pytest-mock**: use the `mocker` fixture (typed as `pytest_mock.MockerFixture`). Don't import `unittest.mock` directly or use `monkeypatch` for patching.
+- **Mock the edges, not the logic under test.** Mock things that are slow, random, external or hard to trigger: LLM calls, the clock (`datetime.now`), SQLite/IO failures, `KeyboardInterrupt`, and a collaborator when testing a caller on its own (e.g. `main()` with `build()` mocked). Don't mock the database in tool and policy tests: they run against a real SQLite file.
+- **Patch where it is looked up:** `mocker.patch.object(build_db, "write", ...)` or `mocker.patch("build_db.sqlite3.connect", ...)`, not the defining module.
+- Use `autospec=True` when patching functions and classes, so a call with the wrong signature fails the test.
+- Use `side_effect` to raise errors or simulate behaviour, `return_value` for canned results, and `mocker.spy` to check calls to real code without replacing it.
+- Assert on calls (`assert_called_once_with`, `call_args`) only when the call is the behaviour being tested; otherwise assert on outcomes (return values, files, DB rows).
+- Build test data in fixtures (`tmp_path` CSVs, a fresh DB copy); never depend on `data/`.
+- Scripts in `scripts/` are importable in tests (`pythonpath = ["scripts"]`), e.g. `import build_db`.
+
 ## Working style
 - Build in small steps; tools and policy first, with unit tests against the real database, then the graph, then evals.
-- Unit tests for tools must not call an LLM.
+- Unit tests must not call a real LLM; mock it with `mocker` (see Testing).
 - Don't commit `data/`, `*.sqlite` or API keys.
