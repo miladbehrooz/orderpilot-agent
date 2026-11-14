@@ -5,7 +5,7 @@ policy values are the single source of truth for tools, tests and evals.
 """
 
 from pathlib import Path
-from typing import Final
+from typing import Final, Literal
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -26,6 +26,7 @@ class Settings(BaseSettings):
         STUCK_DAYS: Days an order can stay in Processing before it counts as stuck.
         LOST_DAYS: Days an order can stay in Shipped before it counts as lost.
         MAX_AUTH_ATTEMPTS: Failed verification attempts allowed before lockout.
+        LOG_LEVEL: Minimum Loguru level written to the console.
     """
 
     model_config = SettingsConfigDict(
@@ -46,6 +47,8 @@ class Settings(BaseSettings):
     STUCK_DAYS: int = 7
     LOST_DAYS: int = 14
     MAX_AUTH_ATTEMPTS: int = 3
+
+    LOG_LEVEL: Literal["TRACE", "DEBUG", "INFO", "SUCCESS", "WARNING", "ERROR", "CRITICAL"] = "INFO"
 
 
 settings = Settings()

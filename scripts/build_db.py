@@ -31,6 +31,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from orderpilot.logging import logger
+
 TS_FMT = "%Y-%m-%d %H:%M:%S"
 WEEK = pd.Timedelta(weeks=1)
 
@@ -66,6 +68,7 @@ def load(data_dir: Path) -> dict[str, pd.DataFrame]:
         for c in ts_cols:
             df[c] = pd.to_datetime(df[c], utc=True, format="ISO8601").dt.floor("s")
         dfs[name] = df
+        logger.debug("Loaded {}.csv: {:,} rows", name, len(df))
     return dfs
 
 
@@ -445,7 +448,7 @@ CHECKS = {
 
 
 def validate(out: Path) -> None:
-    """Run integrity checks on the built database and print a report.
+    """Run integrity checks on the built database and log a report.
 
     Args:
         out: Path of the SQLite file to check.
@@ -455,16 +458,21 @@ def validate(out: Path) -> None:
     """
     con = sqlite3.connect(out)
     failed = False
-    print("\nValidation")
+    logger.info("Validating {}", out)
     for name, sql in CHECKS.items():
         n = con.execute(sql).fetchone()[0]
-        failed |= n != 0
-        print(f"  {'OK  ' if n == 0 else 'FAIL'} {name}: {n}")
+        if n == 0:
+            logger.info("  OK   {}: {}", name, n)
+        else:
+            failed = True
+            logger.error("  FAIL {}: {}", name, n)
     for t in ["users", "products", "orders", "order_items", "distribution_centers"]:
-        print(f"  rows {t}: {con.execute(f'SELECT COUNT(*) FROM {t}').fetchone()[0]:,}")
+        logger.info("  rows {}: {:,}", t, con.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0])
     con.close()
     if failed:
-        raise SystemExit("validation failed")
+        logger.error("Validation failed")
+        raise SystemExit(1)
+    logger.success("Validation passed")
 
 
 # --------------------------------------------------------------------------- main
@@ -482,11 +490,25 @@ def main() -> None:
     today = a.today or datetime.now(UTC).strftime("%Y-%m-%d")
     reference_now = pd.Timestamp(f"{today} 00:00:00", tz="UTC")
 
-    dfs = clean(load(a.data_dir))
+    logger.info("Building {} from {} (TODAY = {})", a.out, a.data_dir, today)
+
+    logger.info("Loading CSVs")
+    dfs = load(a.data_dir)
+    logger.info("Cleaning tables")
+    dfs = clean(dfs)
+
     offset, anchor = shift_dates(dfs, reference_now)
+    logger.info(
+        "Shifted timestamps by {} days ({} weeks); source latest event {}",
+        offset.days,
+        offset.days // 7,
+        anchor.strftime(TS_FMT),
+    )
+
     users = dfs["users"]
     original = users["email"].str.lower()
     users["email"] = make_emails_unique(users, ref_year=reference_now.year, seed=a.seed)
+    logger.info("Made emails unique: {:,} changed", (users["email"] != original).sum())
 
     meta = {
         "reference_now": reference_now.strftime(TS_FMT),
@@ -495,16 +517,12 @@ def main() -> None:
         "email_seed": str(a.seed),
         "built_at": datetime.now(UTC).strftime(TS_FMT),
     }
+    logger.info("Writing {}", a.out)
     write(dfs, a.out, meta)
+    logger.info("reference_now (TODAY): {}", meta["reference_now"])
 
-    print(f"Wrote {a.out}")
-    print(f"  reference_now (TODAY): {meta['reference_now']}")
-    print(
-        f"  shifted by {offset.days} days ({offset.days // 7} weeks); "
-        f"source latest event {meta['source_latest_event']}"
-    )
-    print(f"  emails changed: {(users['email'] != original).sum():,}")
     validate(a.out)
+    logger.success("Built {}", a.out)
 
 
 if __name__ == "__main__":
