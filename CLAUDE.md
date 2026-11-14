@@ -17,7 +17,7 @@ If code and docs disagree, ask before changing either.
 
 ## Non-negotiable design rules
 1. **Business rules and date maths live in tool code**, never only in prompts. Tools return a decision, a `reason_code` and the supporting numbers; the LLM only explains them.
-2. **`user_id` lives in graph state** (injected into tools, e.g. via `InjectedState`). It is never a tool argument the LLM can set.
+2. **`user_id` lives in graph state** (tools read it via LangChain `ToolRuntime`, i.e. `runtime.state`). It is never a tool argument the LLM can set.
 3. **Auth gate:** before `verify_customer` succeeds, only that tool is bound to the model, and every other tool also refuses with `NOT_VERIFIED`.
 4. **Another user's order returns `NOT_FOUND`**, the same as a non-existent order.
 5. **`TODAY` comes from `meta.reference_now`** in the database. Never use `datetime.now()` in tools or evals.
@@ -46,10 +46,15 @@ orderpilot-agent/
 ├── scripts/build_db.py   # CSV -> ecommerce.sqlite
 ├── data/                 # CSVs, git-ignored
 ├── src/orderpilot/
-│   ├── settings.py       # Settings: policy values, DB path, log level
-│   ├── db.py             # connection, reference_now
-│   ├── tools/            # one module per tool group
-│   ├── agent/            # graph, state, prompts
+│   ├── settings.py       # Settings: policy values, DB path, LLM settings, log level
+│   ├── app.py            # composition root: repo -> tools, model, prompt -> graph
+│   ├── llm.py            # LLMFactory (provider registry: openai, anthropic)
+│   ├── domain.py         # plain dataclasses (User, later Order, OrderItem)
+│   ├── db.py             # SQLite connection, timestamp parsing
+│   ├── repository/       # OrderRepository Protocol + SqliteOrderRepository
+│   ├── services/         # framework-free business functions + result models
+│   ├── tools/            # thin LangChain @tool wrappers around services
+│   ├── agent/            # graph, state, prompts (knows only model + tools)
 │   └── policy.py         # eligibility logic shared by read and write tools
 ├── evals/                # scenario generators, user simulator, graders
 └── tests/                # pytest + pytest-mock unit tests (no real LLM calls)

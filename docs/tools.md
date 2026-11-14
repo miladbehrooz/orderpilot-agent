@@ -4,18 +4,20 @@ _Draft, 2026-11-12. Derived from `scenarios.md`._
 
 ## Design principles
 1. **Rules and date math live in tools, not in the LLM.** Tools return the decision, a reason code and the supporting numbers (days since delivery, deadline, refund). The LLM only explains them.
-2. **`user_id` comes from graph state and is never a tool argument.** Tools read it via LangGraph `InjectedState`. The model has no way to pass another user's ID (S1).
+2. **`user_id` comes from graph state and is never a tool argument.** Tools read it via LangChain `ToolRuntime` (`runtime.state`), which replaces the older `InjectedState`. The model has no way to pass another user's ID (S1).
 3. **Defense in depth for auth.** Before verification, only `verify_customer` is bound to the model. Every other tool also refuses with `NOT_VERIFIED` if called (AU5).
 4. **"Not yours" looks like "doesn't exist".** Both return `NOT_FOUND`, so order IDs can't be probed (S1, AM2).
-5. **Structured outputs with reason codes:** `ELIGIBLE`, `NOT_FOUND`, `NOT_VERIFIED`, `ALREADY_SHIPPED`, `NOT_DELIVERED`, `WINDOW_EXPIRED`, `ALREADY_RETURNED`, `ORDER_CANCELLED`. Evals check reason codes, not only the reply text.
+5. **Structured outputs with reason codes:** `ELIGIBLE`, `NOT_FOUND`, `NOT_VERIFIED`, `ALREADY_SHIPPED`, `NOT_DELIVERED`, `WINDOW_EXPIRED`, `ALREADY_RETURNED`, `ORDER_CANCELLED`. Auth adds `VERIFIED`, `NOT_MATCHED`, `MISSING_DETAILS`, `LOCKED`, `ALREADY_VERIFIED`. Any tool can return `INVALID_ARGUMENTS` (bad tool-call arguments) or `INTERNAL_ERROR` (unexpected failure, logged, details hidden). Evals check reason codes, not only the reply text.
 6. **Policy constants in one config file:** `RETURN_WINDOW_DAYS=30`, `STUCK_DAYS=7`, `LOST_DAYS=14`, `MAX_AUTH_ATTEMPTS=3`. `TODAY` is read from the database's `meta.reference_now`, set when the database is built.
 
 ## Milestone 1: Read tools
 
 ### 1. `verify_customer(first_name, last_name, email, postal_code)`
 - Looks the user up by email (unique in the database), then checks name and postal code against that one row. Case-insensitive, trimmed matching. The attempt counter lives in state.
-- Returns `VERIFIED`, `NOT_MATCHED` (with attempts remaining, never which field was wrong), or `LOCKED`.
-- On success, writes `user_id` to state via LangGraph `Command`.
+- Returns `VERIFIED`, `NOT_MATCHED` (with attempts remaining, never which field was wrong), or `LOCKED`. The failure that reaches `MAX_AUTH_ATTEMPTS` returns `LOCKED`; after that the graph answers with a fixed reply and never calls the model.
+- A blank detail returns `MISSING_DETAILS` and does not use up an attempt (AU6).
+- On success, writes `user_id` to state via LangGraph `Command`. `user_id` is never part of the tool's output.
+- After success the tool is no longer bound to the model, and a call anyway returns `ALREADY_VERIFIED` (no switching customers mid-conversation).
 - Scenarios: AU1–AU6
 
 ### 2. `list_my_orders(status=None, date_from=None, date_to=None, limit=10)`

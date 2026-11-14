@@ -16,4 +16,12 @@ class DatabaseBuildError(OrderPilotError):
     """An expected failure while building the database, reported without a traceback."""
 
 
-__all__ = ["DatabaseBuildError", "OrderPilotError"]
+class LLMConfigError(OrderPilotError):
+    """The LLM provider or model is misconfigured (unknown provider, missing key or setting)."""
+
+
+class RepositoryError(OrderPilotError):
+    """The data store is unavailable or returned unexpected data."""
+
+
+__all__ = ["DatabaseBuildError", "LLMConfigError", "OrderPilotError", "RepositoryError"]
