@@ -24,9 +24,11 @@ import argparse
 import random
 import re
 import sqlite3
+import sys
 import unicodedata
-from collections.abc import Iterator
-from datetime import UTC, datetime
+from collections.abc import Iterator, Sequence
+from contextlib import closing
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import pandas as pd
@@ -42,6 +44,28 @@ TIMESTAMP_COLS = {
     "order_items": ["created_at", "shipped_at", "delivered_at", "returned_at"],
 }
 COUNTRY_FIXES = {"Deutschland": "Germany", "España": "Spain"}
+TABLES = ["users", "orders", "order_items", "products", "distribution_centers"]
+
+
+class BuildError(Exception):
+    """An expected failure while building the database, reported without a traceback."""
+
+
+# --------------------------------------------------------------------------- inputs
+def check_inputs(data_dir: Path) -> None:
+    """Check that the data directory and every source CSV exist.
+
+    Args:
+        data_dir: Directory expected to contain the source CSV files.
+
+    Raises:
+        BuildError: If the directory or any CSV is missing; all missing files are listed.
+    """
+    if not data_dir.is_dir():
+        raise BuildError(f"Data directory not found: {data_dir}")
+    missing = [f"{t}.csv" for t in TABLES if not (data_dir / f"{t}.csv").is_file()]
+    if missing:
+        raise BuildError(f"Missing CSV files in {data_dir}: {', '.join(missing)}")
 
 
 # --------------------------------------------------------------------------- load
@@ -55,21 +79,114 @@ def load(data_dir: Path) -> dict[str, pd.DataFrame]:
 
     Returns:
         A mapping from table name to its DataFrame.
+
+    Raises:
+        BuildError: If a file cannot be parsed, lacks a required column, or holds a
+            timestamp that cannot be parsed.
     """
     dfs = {}
-    for name in ["users", "orders", "order_items", "products", "distribution_centers"]:
+    for name in TABLES:
+        path = data_dir / f"{name}.csv"
         ts_cols = TIMESTAMP_COLS.get(name, [])
-        df = pd.read_csv(
-            data_dir / f"{name}.csv",
-            dtype=dict.fromkeys(ts_cols, "string")
-            | ({"postal_code": "string"} if name == "users" else {}),
-            keep_default_na=True,
-        )
+        try:
+            df = pd.read_csv(
+                path,
+                dtype=dict.fromkeys(ts_cols, "string")
+                | ({"postal_code": "string"} if name == "users" else {}),
+                keep_default_na=True,
+            )
+        except (pd.errors.ParserError, pd.errors.EmptyDataError, UnicodeDecodeError) as e:
+            raise BuildError(f"Cannot read {path}: {e}") from e
+
+        missing = [c for c in COLUMNS[name] if c not in df.columns]
+        if missing:
+            raise BuildError(f"{path.name} is missing columns: {', '.join(missing)}")
+
         for c in ts_cols:
-            df[c] = pd.to_datetime(df[c], utc=True, format="ISO8601").dt.floor("s")
+            try:
+                df[c] = pd.to_datetime(df[c], utc=True, format="ISO8601").dt.floor("s")
+            except (ValueError, TypeError) as e:
+                raise BuildError(f"{path.name}: cannot parse timestamps in '{c}': {e}") from e
         dfs[name] = df
         logger.debug("Loaded {}.csv: {:,} rows", name, len(df))
     return dfs
+
+
+def _examples(values: pd.Series, n: int = 5) -> str:
+    """Format a few example values for an error message.
+
+    Args:
+        values: The offending values (e.g. IDs).
+        n: Maximum number of examples to show.
+
+    Returns:
+        A string like ``"3 rows, e.g. 7, 12, 40"``.
+    """
+    unique = values.drop_duplicates()
+    shown = ", ".join(str(v) for v in unique.head(n).tolist())
+    return f"{len(values):,} rows, e.g. {shown}"
+
+
+def check_source_data(dfs: dict[str, pd.DataFrame]) -> None:
+    """Check the loaded tables for problems that would break cleaning or writing.
+
+    Checks unique primary keys, that order items, orders and products point at existing
+    rows, and that user fields needed for email deduplication are usable.
+
+    Args:
+        dfs: Tables returned by :func:`load`.
+
+    Raises:
+        BuildError: Listing every problem found, with counts and example IDs.
+    """
+    problems: list[str] = []
+    users, orders, items = dfs["users"], dfs["orders"], dfs["order_items"]
+    products, dcs = dfs["products"], dfs["distribution_centers"]
+
+    primary_keys = {
+        "users": "id",
+        "orders": "order_id",
+        "order_items": "id",
+        "products": "id",
+        "distribution_centers": "id",
+    }
+    for table, key in primary_keys.items():
+        ids = dfs[table][key]
+        dup = ids[ids.duplicated()]
+        if not dup.empty:
+            problems.append(f"{table}: duplicate {key} ({_examples(dup)})")
+        if ids.isna().any():
+            problems.append(f"{table}: {ids.isna().sum():,} rows with empty {key}")
+
+    references = [
+        ("order_items", items, "order_id", orders["order_id"]),
+        ("order_items", items, "product_id", products["id"]),
+        ("orders", orders, "user_id", users["id"]),
+        ("products", products, "distribution_center_id", dcs["id"]),
+    ]
+    for table, df, col, target in references:
+        orphans = df.loc[~df[col].isin(target), col]
+        if not orphans.empty:
+            problems.append(f"{table}: {col} not found ({_examples(orphans)})")
+
+    email = users["email"].astype("string").str.strip()
+    bad_email = users.loc[email.isna() | ~email.str.contains("@", na=False), "id"]
+    if not bad_email.empty:
+        problems.append(f"users: missing or malformed email ({_examples(bad_email)})")
+    if users["age"].isna().any():
+        problems.append(f"users: empty age ({_examples(users.loc[users['age'].isna(), 'id'])})")
+
+    # Users with a duplicate email get a name-based replacement, which needs usable names.
+    dup_email = email.str.lower().duplicated(keep=False)
+    unusable = users["first_name"].map(_slug).eq("") | users["last_name"].map(_slug).eq("")
+    bad_names = users.loc[dup_email & unusable, "id"]
+    if not bad_names.empty:
+        problems.append(
+            f"users: duplicate email but no usable first/last name ({_examples(bad_names)})"
+        )
+
+    if problems:
+        raise BuildError("Source data problems:\n  - " + "\n  - ".join(problems))
 
 
 # --------------------------------------------------------------------------- clean
@@ -210,8 +327,15 @@ def shift_dates(
 
     Returns:
         A tuple of the applied offset and the latest event time before the shift.
+
+    Raises:
+        BuildError: If the tables contain no timestamps to anchor the shift on.
     """
-    anchor = max(dfs[t][c].max() for t, cols in TIMESTAMP_COLS.items() for c in cols)
+    latest = [dfs[t][c].max() for t, cols in TIMESTAMP_COLS.items() for c in cols]
+    latest = [ts for ts in latest if pd.notna(ts)]
+    if not latest:
+        raise BuildError("No timestamps found in the source data; cannot shift dates")
+    anchor = max(latest)
     offset = ((reference_now - anchor) // WEEK) * WEEK  # whole weeks, keeps weekdays
     for t, cols in TIMESTAMP_COLS.items():
         for c in cols:
@@ -400,25 +524,35 @@ def _to_sql_values(df: pd.DataFrame, table: str) -> list[tuple[object, ...]]:
 def write(dfs: dict[str, pd.DataFrame], out: Path, meta: dict[str, str]) -> None:
     """Write the tables and metadata to a new SQLite database.
 
-    Any existing file at ``out`` is replaced.
+    Any existing file at ``out`` is replaced. Callers should pass a temporary path and
+    move it into place only after validation (see :func:`build`).
 
     Args:
         dfs: Cleaned and shifted tables.
         out: Path of the SQLite file to create.
         meta: Key/value pairs for the ``meta`` table, including ``reference_now``.
+
+    Raises:
+        BuildError: If SQLite rejects the schema or a table's rows.
     """
     out.unlink(missing_ok=True)
-    con = sqlite3.connect(out)
-    con.executescript(SCHEMA)
-    for table in ["distribution_centers", "products", "users", "orders", "order_items"]:
-        cols = COLUMNS[table]
-        con.executemany(
-            f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
-            _to_sql_values(dfs[table], table),
-        )
-    con.executemany("INSERT INTO meta VALUES (?, ?)", meta.items())
-    con.commit()
-    con.close()
+    step = "schema"
+    try:
+        with closing(sqlite3.connect(out)) as con:
+            con.executescript(SCHEMA)
+            for table in ["distribution_centers", "products", "users", "orders", "order_items"]:
+                step = f"table '{table}'"
+                cols = COLUMNS[table]
+                placeholders = ", ".join("?" * len(cols))
+                con.executemany(
+                    f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({placeholders})",
+                    _to_sql_values(dfs[table], table),
+                )
+            step = "table 'meta'"
+            con.executemany("INSERT INTO meta VALUES (?, ?)", meta.items())
+            con.commit()
+    except sqlite3.Error as e:
+        raise BuildError(f"Failed writing {step} to {out}: {e}") from e
 
 
 # --------------------------------------------------------------------------- validate
@@ -447,53 +581,95 @@ CHECKS = {
 }
 
 
-def validate(out: Path) -> None:
-    """Run integrity checks on the built database and log a report.
+def validate(db: Path) -> list[str]:
+    """Run integrity checks on a built database and log a report.
 
     Args:
-        out: Path of the SQLite file to check.
+        db: Path of the SQLite file to check.
 
-    Raises:
-        SystemExit: If any check finds violations.
+    Returns:
+        Names of the checks that found violations; empty if all passed.
     """
-    con = sqlite3.connect(out)
-    failed = False
-    logger.info("Validating {}", out)
-    for name, sql in CHECKS.items():
-        n = con.execute(sql).fetchone()[0]
-        if n == 0:
-            logger.info("  OK   {}: {}", name, n)
-        else:
-            failed = True
-            logger.error("  FAIL {}: {}", name, n)
-    for t in ["users", "products", "orders", "order_items", "distribution_centers"]:
-        logger.info("  rows {}: {:,}", t, con.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0])
-    con.close()
-    if failed:
-        logger.error("Validation failed")
-        raise SystemExit(1)
-    logger.success("Validation passed")
+    failed: list[str] = []
+    logger.info("Validating {}", db)
+    with closing(sqlite3.connect(db)) as con:
+        for name, sql in CHECKS.items():
+            n = con.execute(sql).fetchone()[0]
+            if n == 0:
+                logger.info("  OK   {}: {}", name, n)
+            else:
+                failed.append(name)
+                logger.error("  FAIL {}: {}", name, n)
+        for t in TABLES:
+            count = con.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
+            logger.info("  rows {}: {:,}", t, count)
+    return failed
 
 
 # --------------------------------------------------------------------------- main
-def main() -> None:
-    """Parse command-line arguments and build the database."""
+def _iso_date(value: str) -> date:
+    """Parse a ``YYYY-MM-DD`` command-line value.
+
+    Args:
+        value: The raw argument.
+
+    Returns:
+        The parsed date.
+
+    Raises:
+        argparse.ArgumentTypeError: If the value is not a valid ISO date.
+    """
+    try:
+        return date.fromisoformat(value)
+    except ValueError as e:
+        raise argparse.ArgumentTypeError(f"invalid date {value!r}, expected YYYY-MM-DD") from e
+
+
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    """Parse command-line arguments.
+
+    Args:
+        argv: Arguments to parse; defaults to ``sys.argv[1:]``.
+
+    Returns:
+        The parsed arguments.
+    """
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     p.add_argument("--data-dir", type=Path, default=Path("data"))
     p.add_argument("--out", type=Path, default=Path("ecommerce.sqlite"))
-    p.add_argument("--today", help="reference date YYYY-MM-DD (default: today, UTC)")
+    p.add_argument(
+        "--today", type=_iso_date, help="reference date YYYY-MM-DD (default: today, UTC)"
+    )
     p.add_argument("--seed", type=int, default=42)
-    a = p.parse_args()
+    return p.parse_args(argv)
 
-    today = a.today or datetime.now(UTC).strftime("%Y-%m-%d")
-    reference_now = pd.Timestamp(f"{today} 00:00:00", tz="UTC")
 
-    logger.info("Building {} from {} (TODAY = {})", a.out, a.data_dir, today)
+def build(data_dir: Path, out: Path, today: date, seed: int) -> None:
+    """Build and validate the database, replacing ``out`` only if validation passes.
 
+    The database is written to ``<out>.tmp`` first. On success it atomically replaces
+    ``out``. If validation fails it is kept as ``<out>.failed`` for inspection and
+    ``out`` is left untouched. On any other error the temporary file is removed.
+
+    Args:
+        data_dir: Directory containing the source CSV files.
+        out: Path of the SQLite file to produce.
+        today: Reference date (TODAY) stored in the ``meta`` table.
+        seed: Seed for the email deduplication.
+
+    Raises:
+        BuildError: If the inputs, source data, write or validation fail.
+    """
+    reference_now = pd.Timestamp(f"{today.isoformat()} 00:00:00", tz="UTC")
+    logger.info("Building {} from {} (TODAY = {})", out, data_dir, today)
+
+    check_inputs(data_dir)
     logger.info("Loading CSVs")
-    dfs = load(a.data_dir)
+    dfs = load(data_dir)
+    logger.info("Checking source data")
+    check_source_data(dfs)
     logger.info("Cleaning tables")
     dfs = clean(dfs)
 
@@ -507,23 +683,64 @@ def main() -> None:
 
     users = dfs["users"]
     original = users["email"].str.lower()
-    users["email"] = make_emails_unique(users, ref_year=reference_now.year, seed=a.seed)
+    users["email"] = make_emails_unique(users, ref_year=reference_now.year, seed=seed)
     logger.info("Made emails unique: {:,} changed", (users["email"] != original).sum())
 
     meta = {
         "reference_now": reference_now.strftime(TS_FMT),
         "date_shift_days": str(offset.days),
         "source_latest_event": anchor.strftime(TS_FMT),
-        "email_seed": str(a.seed),
+        "email_seed": str(seed),
         "built_at": datetime.now(UTC).strftime(TS_FMT),
     }
-    logger.info("Writing {}", a.out)
-    write(dfs, a.out, meta)
-    logger.info("reference_now (TODAY): {}", meta["reference_now"])
 
-    validate(a.out)
-    logger.success("Built {}", a.out)
+    tmp = out.with_name(out.name + ".tmp")
+    failed_copy = out.with_name(out.name + ".failed")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        logger.info("Writing {}", tmp)
+        write(dfs, tmp, meta)
+        failures = validate(tmp)
+        if failures:
+            tmp.replace(failed_copy)
+            raise BuildError(
+                f"Validation failed ({', '.join(failures)}). "
+                f"Kept {failed_copy} for inspection; {out} is unchanged."
+            )
+        tmp.replace(out)
+        failed_copy.unlink(missing_ok=True)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+    logger.info("reference_now (TODAY): {}", meta["reference_now"])
+    logger.success("Built {}", out)
+
+
+@logger.catch(onerror=lambda _: sys.exit(1))
+def main(argv: Sequence[str] | None = None) -> int:
+    """Run the build from the command line.
+
+    Expected failures (:class:`BuildError`) are logged without a traceback. Unexpected
+    errors are logged with a full traceback by ``logger.catch`` and exit with code 1.
+
+    Args:
+        argv: Command-line arguments; defaults to ``sys.argv[1:]``.
+
+    Returns:
+        The process exit code: 0 on success, 1 on a build error, 130 if interrupted.
+    """
+    args = parse_args(argv)
+    today = args.today or datetime.now(UTC).date()
+    try:
+        build(args.data_dir, args.out, today, args.seed)
+    except BuildError as e:
+        logger.error("Build failed: {}", e)
+        return 1
+    except KeyboardInterrupt:
+        logger.warning("Interrupted; {} is unchanged", args.out)
+        return 130
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

@@ -82,7 +82,7 @@ docstring-code-format = true
 python_version = "3.11"
 strict = true
 files = ["src", "tests", "evals", "scripts"]
-mypy_path = "src"
+mypy_path = "src:scripts"
 explicit_package_bases = true
 warn_unreachable = true
 pretty = true
@@ -90,4 +90,5 @@ pretty = true
 # ----------------------------------------------------------------------------- pytest
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["scripts"]
 addopts = "-ra"
