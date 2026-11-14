@@ -33,6 +33,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from orderpilot.errors import DatabaseBuildError
 from orderpilot.logging import logger
 
 TS_FMT = "%Y-%m-%d %H:%M:%S"
@@ -47,10 +48,6 @@ COUNTRY_FIXES = {"Deutschland": "Germany", "España": "Spain"}
 TABLES = ["users", "orders", "order_items", "products", "distribution_centers"]
 
 
-class BuildError(Exception):
-    """An expected failure while building the database, reported without a traceback."""
-
-
 # --------------------------------------------------------------------------- inputs
 def check_inputs(data_dir: Path) -> None:
     """Check that the data directory and every source CSV exist.
@@ -59,13 +56,13 @@ def check_inputs(data_dir: Path) -> None:
         data_dir: Directory expected to contain the source CSV files.
 
     Raises:
-        BuildError: If the directory or any CSV is missing; all missing files are listed.
+        DatabaseBuildError: If the directory or any CSV is missing; all missing files are listed.
     """
     if not data_dir.is_dir():
-        raise BuildError(f"Data directory not found: {data_dir}")
+        raise DatabaseBuildError(f"Data directory not found: {data_dir}")
     missing = [f"{t}.csv" for t in TABLES if not (data_dir / f"{t}.csv").is_file()]
     if missing:
-        raise BuildError(f"Missing CSV files in {data_dir}: {', '.join(missing)}")
+        raise DatabaseBuildError(f"Missing CSV files in {data_dir}: {', '.join(missing)}")
 
 
 # --------------------------------------------------------------------------- load
@@ -81,7 +78,7 @@ def load(data_dir: Path) -> dict[str, pd.DataFrame]:
         A mapping from table name to its DataFrame.
 
     Raises:
-        BuildError: If a file cannot be parsed, lacks a required column, or holds a
+        DatabaseBuildError: If a file cannot be parsed, lacks a required column, or holds a
             timestamp that cannot be parsed.
     """
     dfs = {}
@@ -96,17 +93,19 @@ def load(data_dir: Path) -> dict[str, pd.DataFrame]:
                 keep_default_na=True,
             )
         except (pd.errors.ParserError, pd.errors.EmptyDataError, UnicodeDecodeError) as e:
-            raise BuildError(f"Cannot read {path}: {e}") from e
+            raise DatabaseBuildError(f"Cannot read {path}: {e}") from e
 
         missing = [c for c in COLUMNS[name] if c not in df.columns]
         if missing:
-            raise BuildError(f"{path.name} is missing columns: {', '.join(missing)}")
+            raise DatabaseBuildError(f"{path.name} is missing columns: {', '.join(missing)}")
 
         for c in ts_cols:
             try:
                 df[c] = pd.to_datetime(df[c], utc=True, format="ISO8601").dt.floor("s")
             except (ValueError, TypeError) as e:
-                raise BuildError(f"{path.name}: cannot parse timestamps in '{c}': {e}") from e
+                raise DatabaseBuildError(
+                    f"{path.name}: cannot parse timestamps in '{c}': {e}"
+                ) from e
         dfs[name] = df
         logger.debug("Loaded {}.csv: {:,} rows", name, len(df))
     return dfs
@@ -137,7 +136,7 @@ def check_source_data(dfs: dict[str, pd.DataFrame]) -> None:
         dfs: Tables returned by :func:`load`.
 
     Raises:
-        BuildError: Listing every problem found, with counts and example IDs.
+        DatabaseBuildError: Listing every problem found, with counts and example IDs.
     """
     problems: list[str] = []
     users, orders, items = dfs["users"], dfs["orders"], dfs["order_items"]
@@ -186,7 +185,7 @@ def check_source_data(dfs: dict[str, pd.DataFrame]) -> None:
         )
 
     if problems:
-        raise BuildError("Source data problems:\n  - " + "\n  - ".join(problems))
+        raise DatabaseBuildError("Source data problems:\n  - " + "\n  - ".join(problems))
 
 
 # --------------------------------------------------------------------------- clean
@@ -329,12 +328,12 @@ def shift_dates(
         A tuple of the applied offset and the latest event time before the shift.
 
     Raises:
-        BuildError: If the tables contain no timestamps to anchor the shift on.
+        DatabaseBuildError: If the tables contain no timestamps to anchor the shift on.
     """
     latest = [dfs[t][c].max() for t, cols in TIMESTAMP_COLS.items() for c in cols]
     latest = [ts for ts in latest if pd.notna(ts)]
     if not latest:
-        raise BuildError("No timestamps found in the source data; cannot shift dates")
+        raise DatabaseBuildError("No timestamps found in the source data; cannot shift dates")
     anchor = max(latest)
     offset = ((reference_now - anchor) // WEEK) * WEEK  # whole weeks, keeps weekdays
     for t, cols in TIMESTAMP_COLS.items():
@@ -533,7 +532,7 @@ def write(dfs: dict[str, pd.DataFrame], out: Path, meta: dict[str, str]) -> None
         meta: Key/value pairs for the ``meta`` table, including ``reference_now``.
 
     Raises:
-        BuildError: If SQLite rejects the schema or a table's rows.
+        DatabaseBuildError: If SQLite rejects the schema or a table's rows.
     """
     out.unlink(missing_ok=True)
     step = "schema"
@@ -552,7 +551,7 @@ def write(dfs: dict[str, pd.DataFrame], out: Path, meta: dict[str, str]) -> None
             con.executemany("INSERT INTO meta VALUES (?, ?)", meta.items())
             con.commit()
     except sqlite3.Error as e:
-        raise BuildError(f"Failed writing {step} to {out}: {e}") from e
+        raise DatabaseBuildError(f"Failed writing {step} to {out}: {e}") from e
 
 
 # --------------------------------------------------------------------------- validate
@@ -660,7 +659,7 @@ def build(data_dir: Path, out: Path, today: date, seed: int) -> None:
         seed: Seed for the email deduplication.
 
     Raises:
-        BuildError: If the inputs, source data, write or validation fail.
+        DatabaseBuildError: If the inputs, source data, write or validation fail.
     """
     reference_now = pd.Timestamp(f"{today.isoformat()} 00:00:00", tz="UTC")
     logger.info("Building {} from {} (TODAY = {})", out, data_dir, today)
@@ -703,7 +702,7 @@ def build(data_dir: Path, out: Path, today: date, seed: int) -> None:
         failures = validate(tmp)
         if failures:
             tmp.replace(failed_copy)
-            raise BuildError(
+            raise DatabaseBuildError(
                 f"Validation failed ({', '.join(failures)}). "
                 f"Kept {failed_copy} for inspection; {out} is unchanged."
             )
@@ -720,7 +719,7 @@ def build(data_dir: Path, out: Path, today: date, seed: int) -> None:
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the build from the command line.
 
-    Expected failures (:class:`BuildError`) are logged without a traceback. Unexpected
+    Expected failures (:class:`DatabaseBuildError`) are logged without a traceback. Unexpected
     errors are logged with a full traceback by ``logger.catch`` and exit with code 1.
 
     Args:
@@ -733,7 +732,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     today = args.today or datetime.now(UTC).date()
     try:
         build(args.data_dir, args.out, today, args.seed)
-    except BuildError as e:
+    except DatabaseBuildError as e:
         logger.error("Build failed: {}", e)
         return 1
     except KeyboardInterrupt:

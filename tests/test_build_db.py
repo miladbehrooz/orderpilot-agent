@@ -11,7 +11,8 @@ import pytest
 from pytest_mock import MockerFixture
 
 import build_db
-from build_db import BuildError, build, main, parse_args
+from build_db import build, main, parse_args
+from orderpilot.errors import DatabaseBuildError
 
 TODAY = date(2026, 11, 12)
 
@@ -136,7 +137,7 @@ def test_build_creates_valid_database(
 
 def test_missing_data_dir_raises(tmp_path: Path) -> None:
     """A non-existent data directory fails with a clear message."""
-    with pytest.raises(BuildError, match="Data directory not found"):
+    with pytest.raises(DatabaseBuildError, match="Data directory not found"):
         build(tmp_path / "nope", tmp_path / "db.sqlite", TODAY, seed=42)
 
 
@@ -145,7 +146,7 @@ def test_missing_csvs_are_all_listed(
 ) -> None:
     """Every missing CSV is named in one error, not just the first."""
     del tables["orders"], tables["products"]
-    with pytest.raises(BuildError, match=r"orders\.csv, products\.csv"):
+    with pytest.raises(DatabaseBuildError, match=r"orders\.csv, products\.csv"):
         build(write_csvs(tables), tmp_path / "db.sqlite", TODAY, seed=42)
 
 
@@ -154,7 +155,7 @@ def test_missing_column_raises(
 ) -> None:
     """A CSV without a required column names the file and the column."""
     tables["orders"] = tables["orders"].drop(columns=["status"])
-    with pytest.raises(BuildError, match=r"orders\.csv is missing columns: status"):
+    with pytest.raises(DatabaseBuildError, match=r"orders\.csv is missing columns: status"):
         build(write_csvs(tables), tmp_path / "db.sqlite", TODAY, seed=42)
 
 
@@ -163,7 +164,9 @@ def test_unparseable_timestamp_raises(
 ) -> None:
     """A malformed timestamp names the file and the column."""
     tables["orders"].loc[0, "shipped_at"] = "not a date"
-    with pytest.raises(BuildError, match=r"orders\.csv: cannot parse timestamps in 'shipped_at'"):
+    with pytest.raises(
+        DatabaseBuildError, match=r"orders\.csv: cannot parse timestamps in 'shipped_at'"
+    ):
         build(write_csvs(tables), tmp_path / "db.sqlite", TODAY, seed=42)
 
 
@@ -172,7 +175,9 @@ def test_orphan_order_item_raises(
 ) -> None:
     """An order item pointing at a non-existent order fails before cleaning."""
     tables["order_items"].loc[1, "order_id"] = 999
-    with pytest.raises(BuildError, match=r"order_items: order_id not found \(1 rows, e\.g\. 999\)"):
+    with pytest.raises(
+        DatabaseBuildError, match=r"order_items: order_id not found \(1 rows, e\.g\. 999\)"
+    ):
         build(write_csvs(tables), tmp_path / "db.sqlite", TODAY, seed=42)
 
 
@@ -181,7 +186,9 @@ def test_duplicate_order_id_raises(
 ) -> None:
     """Duplicate primary keys are reported with the offending ID."""
     tables["orders"].loc[1, "order_id"] = 1
-    with pytest.raises(BuildError, match=r"orders: duplicate order_id \(1 rows, e\.g\. 1\)"):
+    with pytest.raises(
+        DatabaseBuildError, match=r"orders: duplicate order_id \(1 rows, e\.g\. 1\)"
+    ):
         build(write_csvs(tables), tmp_path / "db.sqlite", TODAY, seed=42)
 
 
@@ -190,7 +197,7 @@ def test_malformed_email_raises(
 ) -> None:
     """An email without '@' is reported before the deduplication step can crash."""
     tables["users"].loc[0, "email"] = "no-at-sign"
-    with pytest.raises(BuildError, match="missing or malformed email"):
+    with pytest.raises(DatabaseBuildError, match="missing or malformed email"):
         build(write_csvs(tables), tmp_path / "db.sqlite", TODAY, seed=42)
 
 
@@ -207,7 +214,7 @@ def test_validation_failure_keeps_previous_database(
 
     validate_spy = mocker.spy(build_db, "validate")
     tables["orders"].loc[0, "num_of_item"] = 2  # passes source checks, fails validation
-    with pytest.raises(BuildError, match="item count mismatch"):
+    with pytest.raises(DatabaseBuildError, match="item count mismatch"):
         build(write_csvs(tables), out, TODAY, seed=42)
 
     validate_spy.assert_called_once_with(tmp_path / "ecommerce.sqlite.tmp")  # never `out`
@@ -223,11 +230,11 @@ def test_sqlite_error_is_reported_and_temp_file_removed(
     tmp_path: Path,
     mocker: MockerFixture,
 ) -> None:
-    """A SQLite error during the write becomes a BuildError naming the step."""
+    """A SQLite error during the write becomes a DatabaseBuildError naming the step."""
     # Patch where build_db looks it up.
     mocker.patch("build_db.sqlite3.connect", side_effect=sqlite3.OperationalError("disk I/O error"))
     out = tmp_path / "ecommerce.sqlite"
-    with pytest.raises(BuildError, match=r"Failed writing schema .*: disk I/O error"):
+    with pytest.raises(DatabaseBuildError, match=r"Failed writing schema .*: disk I/O error"):
         build(write_csvs(tables), out, TODAY, seed=42)
     assert not out.exists()
     assert not (tmp_path / "ecommerce.sqlite.tmp").exists()
@@ -290,8 +297,8 @@ def test_main_defaults_today_to_current_utc_date(mocker: MockerFixture) -> None:
 
 
 def test_main_returns_1_on_build_error(mocker: MockerFixture) -> None:
-    """main() turns a BuildError into exit code 1 instead of a traceback."""
-    mocker.patch.object(build_db, "build", autospec=True, side_effect=BuildError("boom"))
+    """main() turns a DatabaseBuildError into exit code 1 instead of a traceback."""
+    mocker.patch.object(build_db, "build", autospec=True, side_effect=DatabaseBuildError("boom"))
     assert main([]) == 1
 
 
