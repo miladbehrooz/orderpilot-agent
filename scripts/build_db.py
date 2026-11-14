@@ -26,9 +26,11 @@ import re
 import sqlite3
 import sys
 import unicodedata
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import closing
+from dataclasses import dataclass
 from datetime import UTC, date, datetime
+from functools import cached_property
 from pathlib import Path
 
 import pandas as pd
@@ -36,43 +38,313 @@ import pandas as pd
 from orderpilot.errors import DatabaseBuildError
 from orderpilot.logging import logger
 
-TS_FMT = "%Y-%m-%d %H:%M:%S"
-WEEK = pd.Timedelta(weeks=1)
 
-TIMESTAMP_COLS = {
-    "users": ["created_at"],
-    "orders": ["created_at", "shipped_at", "delivered_at", "returned_at"],
-    "order_items": ["created_at", "shipped_at", "delivered_at", "returned_at"],
-}
-COUNTRY_FIXES = {"Deutschland": "Germany", "España": "Spain"}
-TABLES = ["users", "orders", "order_items", "products", "distribution_centers"]
+# --------------------------------------------------------------------------- config
+@dataclass(frozen=True)
+class TableSpec:
+    """How to read one source CSV. Everything else about a table comes from the schema.
+
+    Attributes:
+        timestamp_columns: Columns parsed as UTC timestamps and shifted to TODAY.
+        string_columns: Extra columns read as text so values are kept as-is
+            (e.g. postal codes with leading zeros).
+    """
+
+    timestamp_columns: tuple[str, ...] = ()
+    string_columns: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class ForeignKey:
+    """A foreign key from the schema, e.g. ``orders.user_id -> users.id``.
+
+    Attributes:
+        table: Table holding the reference.
+        column: Referencing column.
+        ref_table: Referenced table.
+        ref_column: Referenced column.
+    """
+
+    table: str
+    column: str
+    ref_table: str
+    ref_column: str
+
+
+@dataclass(frozen=True)
+class SchemaInfo:
+    """Facts read from the schema by creating it in an in-memory database.
+
+    Attributes:
+        columns: Each table's columns, in schema order.
+        primary_keys: Each table's primary-key column.
+        foreign_keys: All foreign keys, in schema order.
+        table_order: Tables in creation order, which is safe for inserts.
+    """
+
+    columns: Mapping[str, list[str]]
+    primary_keys: Mapping[str, str]
+    foreign_keys: list[ForeignKey]
+    table_order: list[str]
+
+
+@dataclass(frozen=True)
+class BuildConfig:
+    """Everything the build needs besides its command-line arguments.
+
+    Create it with :func:`default_config` and pass it to each step. Tests can change a
+    value with :func:`dataclasses.replace`.
+
+    Attributes:
+        tables: Source tables to load, in load order, keyed by CSV/table name.
+        country_fixes: Country spellings to normalise, e.g. ``Deutschland -> Germany``.
+        schema: SQL script that creates the database. Source of truth for columns,
+            primary keys, foreign keys and insert order.
+        checks: Validation queries by name; each returns the number of violations.
+        timestamp_format: Format for timestamps stored as text in SQLite.
+    """
+
+    tables: Mapping[str, TableSpec]
+    country_fixes: Mapping[str, str]
+    schema: str
+    checks: Mapping[str, str]
+    timestamp_format: str = "%Y-%m-%d %H:%M:%S"
+
+    @cached_property
+    def schema_info(self) -> SchemaInfo:
+        """Return the columns, keys and table order defined by :attr:`schema`."""
+        return inspect_schema(self.schema)
+
+    @property
+    def insert_order(self) -> list[str]:
+        """Return the source tables in an order that satisfies the foreign keys."""
+        return [t for t in self.schema_info.table_order if t in self.tables]
+
+
+def inspect_schema(schema: str) -> SchemaInfo:
+    """Read columns, keys and table order by creating the schema in memory.
+
+    Args:
+        schema: SQL script with ``CREATE TABLE`` statements.
+
+    Returns:
+        The facts about every table in the schema.
+    """
+    with closing(sqlite3.connect(":memory:")) as con:
+        con.executescript(schema)
+        tables = [
+            r[0]
+            for r in con.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+                " AND name NOT LIKE 'sqlite_%' ORDER BY rowid"
+            )
+        ]
+        columns: dict[str, list[str]] = {}
+        primary_keys: dict[str, str] = {}
+        foreign_keys: list[ForeignKey] = []
+        for t in tables:
+            info = con.execute(f"PRAGMA table_info({t})").fetchall()  # cid, name, ..., pk
+            columns[t] = [r[1] for r in info]
+            pk = [r[1] for r in info if r[5] == 1]
+            if len(pk) == 1:
+                primary_keys[t] = pk[0]
+            foreign_keys += [
+                ForeignKey(t, r[3], r[2], r[4])  # id, seq, table, from, to, ...
+                for r in con.execute(f"PRAGMA foreign_key_list({t})")
+            ]
+    return SchemaInfo(columns, primary_keys, foreign_keys, tables)
+
+
+def default_config() -> BuildConfig:
+    """Return the build configuration for the theLook dataset.
+
+    Returns:
+        The configuration used by the command-line build.
+    """
+    event_columns = ("created_at", "shipped_at", "delivered_at", "returned_at")
+    return BuildConfig(
+        tables={
+            "users": TableSpec(timestamp_columns=("created_at",), string_columns=("postal_code",)),
+            "orders": TableSpec(timestamp_columns=event_columns),
+            "order_items": TableSpec(timestamp_columns=event_columns),
+            "products": TableSpec(),
+            "distribution_centers": TableSpec(),
+        },
+        country_fixes={"Deutschland": "Germany", "España": "Spain"},
+        schema=_default_schema(),
+        checks=_default_checks(),
+    )
+
+
+def _default_schema() -> str:
+    """Return the SQL script that creates the agent's database.
+
+    Returns:
+        ``CREATE TABLE``/``CREATE INDEX`` statements, including the empty Milestone-2
+        tables and the ``meta`` table.
+    """
+    return """
+PRAGMA foreign_keys = ON;
+
+CREATE TABLE meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+CREATE TABLE distribution_centers (
+    id        INTEGER PRIMARY KEY,
+    name      TEXT NOT NULL,
+    latitude  REAL,
+    longitude REAL
+);
+
+CREATE TABLE products (
+    id                     INTEGER PRIMARY KEY,
+    name                   TEXT,
+    brand                  TEXT,
+    category               TEXT NOT NULL,
+    department             TEXT NOT NULL,
+    cost                   REAL NOT NULL,
+    retail_price           REAL NOT NULL,
+    sku                    TEXT NOT NULL UNIQUE,
+    distribution_center_id INTEGER NOT NULL REFERENCES distribution_centers(id)
+);
+
+CREATE TABLE users (
+    id             INTEGER PRIMARY KEY,
+    first_name     TEXT NOT NULL,
+    last_name      TEXT NOT NULL,
+    email          TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    age            INTEGER,
+    gender         TEXT,
+    street_address TEXT,
+    postal_code    TEXT NOT NULL,
+    city           TEXT,
+    state          TEXT,
+    country        TEXT,
+    latitude       REAL,
+    longitude      REAL,
+    traffic_source TEXT,
+    created_at     TEXT NOT NULL
+);
+
+CREATE TABLE orders (
+    order_id     INTEGER PRIMARY KEY,
+    user_id      INTEGER NOT NULL REFERENCES users(id),
+    status       TEXT NOT NULL
+                 CHECK (status IN ('Processing','Shipped','Complete','Returned','Cancelled')),
+    gender       TEXT,
+    num_of_item  INTEGER NOT NULL,
+    created_at   TEXT NOT NULL,
+    shipped_at   TEXT,
+    delivered_at TEXT,
+    returned_at  TEXT
+);
+
+CREATE TABLE order_items (
+    id                INTEGER PRIMARY KEY,
+    order_id          INTEGER NOT NULL REFERENCES orders(order_id),
+    user_id           INTEGER NOT NULL REFERENCES users(id),
+    product_id        INTEGER NOT NULL REFERENCES products(id),
+    inventory_item_id INTEGER,  -- inventory_items table not loaded
+    status            TEXT NOT NULL
+                      CHECK (status IN ('Processing','Shipped','Complete','Returned','Cancelled')),
+    sale_price        REAL NOT NULL,
+    created_at        TEXT NOT NULL,
+    shipped_at        TEXT,
+    delivered_at      TEXT,
+    returned_at       TEXT
+);
+
+-- Milestone 2 (writes): empty for now
+CREATE TABLE return_requests (
+    return_id     INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id      INTEGER NOT NULL REFERENCES orders(order_id),
+    order_item_id INTEGER NOT NULL UNIQUE REFERENCES order_items(id),
+    refund_amount REAL NOT NULL,
+    reason        TEXT,
+    status        TEXT NOT NULL DEFAULT 'requested',
+    created_at    TEXT NOT NULL
+);
+
+CREATE TABLE support_tickets (
+    ticket_id   INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     INTEGER NOT NULL REFERENCES users(id),
+    order_id    INTEGER REFERENCES orders(order_id),
+    category    TEXT NOT NULL CHECK (category IN ('stuck_order','lost_package','other')),
+    description TEXT,
+    status      TEXT NOT NULL DEFAULT 'open',
+    created_at  TEXT NOT NULL
+);
+CREATE UNIQUE INDEX one_open_ticket_per_order ON support_tickets(order_id)
+    WHERE status = 'open' AND order_id IS NOT NULL;
+
+CREATE INDEX idx_orders_user        ON orders(user_id, created_at);
+CREATE INDEX idx_items_order        ON order_items(order_id);
+CREATE INDEX idx_items_user         ON order_items(user_id);
+CREATE INDEX idx_items_product      ON order_items(product_id);
+CREATE INDEX idx_users_email_postal ON users(email, postal_code);
+"""
+
+
+def _default_checks() -> dict[str, str]:
+    """Return the validation queries run on the built database.
+
+    Returns:
+        Queries by check name; each returns the number of violating rows.
+    """
+    return {
+        "foreign keys": "SELECT COUNT(*) FROM pragma_foreign_key_check",
+        "duplicate emails": "SELECT COUNT(*) - COUNT(DISTINCT lower(email)) FROM users",
+        "order chronology": """SELECT COUNT(*) FROM orders WHERE shipped_at < created_at
+                           OR delivered_at < shipped_at OR returned_at < delivered_at""",
+        "item chronology": """SELECT COUNT(*) FROM order_items WHERE shipped_at < created_at
+                          OR delivered_at < shipped_at OR returned_at < delivered_at""",
+        "events after TODAY": """SELECT COUNT(*) FROM orders, meta m WHERE m.key='reference_now'
+                             AND max(created_at, ifnull(shipped_at,''), ifnull(delivered_at,''),
+                                     ifnull(returned_at,'')) > m.value""",
+        "status vs timestamps": """SELECT COUNT(*) FROM orders WHERE
+            (status IN ('Processing','Cancelled')
+                AND (shipped_at IS NOT NULL OR delivered_at IS NOT NULL))
+         OR (status = 'Shipped'  AND (shipped_at IS NULL OR delivered_at IS NOT NULL))
+         OR (status = 'Complete' AND (delivered_at IS NULL OR returned_at IS NOT NULL))
+         OR (status = 'Returned' AND returned_at IS NULL)""",
+        "item count mismatch": """SELECT COUNT(*) FROM orders o
+                              JOIN (SELECT order_id, COUNT(*) n FROM order_items
+                                    GROUP BY order_id) i
+                              USING (order_id) WHERE o.num_of_item <> i.n""",
+        "item/order status mismatch": """SELECT COUNT(*) FROM order_items i
+                                     JOIN orders o USING (order_id) WHERE i.status <> o.status""",
+    }
 
 
 # --------------------------------------------------------------------------- inputs
-def check_inputs(data_dir: Path) -> None:
+def check_inputs(data_dir: Path, config: BuildConfig) -> None:
     """Check that the data directory and every source CSV exist.
 
     Args:
         data_dir: Directory expected to contain the source CSV files.
+        config: Build configuration; its ``tables`` name the expected CSVs.
 
     Raises:
         DatabaseBuildError: If the directory or any CSV is missing; all missing files are listed.
     """
     if not data_dir.is_dir():
         raise DatabaseBuildError(f"Data directory not found: {data_dir}")
-    missing = [f"{t}.csv" for t in TABLES if not (data_dir / f"{t}.csv").is_file()]
+    missing = [f"{t}.csv" for t in config.tables if not (data_dir / f"{t}.csv").is_file()]
     if missing:
         raise DatabaseBuildError(f"Missing CSV files in {data_dir}: {', '.join(missing)}")
 
 
 # --------------------------------------------------------------------------- load
-def load(data_dir: Path) -> dict[str, pd.DataFrame]:
+def load(data_dir: Path, config: BuildConfig) -> dict[str, pd.DataFrame]:
     """Load the theLook CSV files into DataFrames.
 
     Timestamp columns are read as text and parsed as UTC, truncated to whole seconds.
 
     Args:
         data_dir: Directory containing the source CSV files.
+        config: Build configuration: which tables to load and how to read them.
 
     Returns:
         A mapping from table name to its DataFrame.
@@ -82,24 +354,21 @@ def load(data_dir: Path) -> dict[str, pd.DataFrame]:
             timestamp that cannot be parsed.
     """
     dfs = {}
-    for name in TABLES:
+    for name, spec in config.tables.items():
         path = data_dir / f"{name}.csv"
-        ts_cols = TIMESTAMP_COLS.get(name, [])
+        text_columns = spec.timestamp_columns + spec.string_columns
         try:
             df = pd.read_csv(
-                path,
-                dtype=dict.fromkeys(ts_cols, "string")
-                | ({"postal_code": "string"} if name == "users" else {}),
-                keep_default_na=True,
+                path, dtype=dict.fromkeys(text_columns, "string"), keep_default_na=True
             )
         except (pd.errors.ParserError, pd.errors.EmptyDataError, UnicodeDecodeError) as e:
             raise DatabaseBuildError(f"Cannot read {path}: {e}") from e
 
-        missing = [c for c in COLUMNS[name] if c not in df.columns]
+        missing = [c for c in config.schema_info.columns[name] if c not in df.columns]
         if missing:
             raise DatabaseBuildError(f"{path.name} is missing columns: {', '.join(missing)}")
 
-        for c in ts_cols:
+        for c in spec.timestamp_columns:
             try:
                 df[c] = pd.to_datetime(df[c], utc=True, format="ISO8601").dt.floor("s")
             except (ValueError, TypeError) as e:
@@ -126,30 +395,25 @@ def _examples(values: pd.Series, n: int = 5) -> str:
     return f"{len(values):,} rows, e.g. {shown}"
 
 
-def check_source_data(dfs: dict[str, pd.DataFrame]) -> None:
+def check_source_data(dfs: dict[str, pd.DataFrame], config: BuildConfig) -> None:
     """Check the loaded tables for problems that would break cleaning or writing.
 
-    Checks unique primary keys, that order items, orders and products point at existing
-    rows, and that user fields needed for email deduplication are usable.
+    Checks unique primary keys, that every foreign key in the schema points at an
+    existing row, and that user fields needed for email deduplication are usable.
 
     Args:
         dfs: Tables returned by :func:`load`.
+        config: Build configuration; keys are read from its schema.
 
     Raises:
         DatabaseBuildError: Listing every problem found, with counts and example IDs.
     """
     problems: list[str] = []
-    users, orders, items = dfs["users"], dfs["orders"], dfs["order_items"]
-    products, dcs = dfs["products"], dfs["distribution_centers"]
+    users = dfs["users"]
+    schema = config.schema_info
 
-    primary_keys = {
-        "users": "id",
-        "orders": "order_id",
-        "order_items": "id",
-        "products": "id",
-        "distribution_centers": "id",
-    }
-    for table, key in primary_keys.items():
+    for table in config.tables:
+        key = schema.primary_keys[table]
         ids = dfs[table][key]
         dup = ids[ids.duplicated()]
         if not dup.empty:
@@ -157,16 +421,13 @@ def check_source_data(dfs: dict[str, pd.DataFrame]) -> None:
         if ids.isna().any():
             problems.append(f"{table}: {ids.isna().sum():,} rows with empty {key}")
 
-    references = [
-        ("order_items", items, "order_id", orders["order_id"]),
-        ("order_items", items, "product_id", products["id"]),
-        ("orders", orders, "user_id", users["id"]),
-        ("products", products, "distribution_center_id", dcs["id"]),
-    ]
-    for table, df, col, target in references:
-        orphans = df.loc[~df[col].isin(target), col]
+    for fk in schema.foreign_keys:
+        if fk.table not in dfs or fk.ref_table not in dfs:
+            continue  # e.g. Milestone-2 tables, which start empty
+        values = dfs[fk.table][fk.column]
+        orphans = values[values.notna() & ~values.isin(dfs[fk.ref_table][fk.ref_column])]
         if not orphans.empty:
-            problems.append(f"{table}: {col} not found ({_examples(orphans)})")
+            problems.append(f"{fk.table}: {fk.column} not found ({_examples(orphans)})")
 
     email = users["email"].astype("string").str.strip()
     bad_email = users.loc[email.isna() | ~email.str.contains("@", na=False), "id"]
@@ -278,7 +539,7 @@ def make_emails_unique(users: pd.DataFrame, ref_year: int, seed: int) -> pd.Seri
     return users["id"].map(new)
 
 
-def clean(dfs: dict[str, pd.DataFrame]) -> dict[str, pd.DataFrame]:
+def clean(dfs: dict[str, pd.DataFrame], config: BuildConfig) -> dict[str, pd.DataFrame]:
     """Clean the loaded tables in place.
 
     Sets each item's ``created_at`` to its order's, rounds prices to 2 decimals,
@@ -287,6 +548,7 @@ def clean(dfs: dict[str, pd.DataFrame]) -> dict[str, pd.DataFrame]:
 
     Args:
         dfs: Tables returned by :func:`load`.
+        config: Build configuration; supplies the country fixes.
 
     Returns:
         The same mapping, with the DataFrames modified in place.
@@ -304,7 +566,7 @@ def clean(dfs: dict[str, pd.DataFrame]) -> dict[str, pd.DataFrame]:
     products["cost"] = products["cost"].round(2)
 
     # text fields
-    users["country"] = users["country"].replace(COUNTRY_FIXES)
+    users["country"] = users["country"].replace(dict(config.country_fixes))
     for c in ["first_name", "last_name", "email", "postal_code", "city", "state", "street_address"]:
         users[c] = users[c].astype("string").str.strip()
     for c in ["name", "brand"]:
@@ -314,7 +576,7 @@ def clean(dfs: dict[str, pd.DataFrame]) -> dict[str, pd.DataFrame]:
 
 # --------------------------------------------------------------------------- date shift
 def shift_dates(
-    dfs: dict[str, pd.DataFrame], reference_now: pd.Timestamp
+    dfs: dict[str, pd.DataFrame], reference_now: pd.Timestamp, config: BuildConfig
 ) -> tuple[pd.Timedelta, pd.Timestamp]:
     """Shift all timestamps by whole weeks so the latest event lands just before TODAY.
 
@@ -323,6 +585,7 @@ def shift_dates(
     Args:
         dfs: Cleaned tables; timestamp columns are modified in place.
         reference_now: The fixed reference time (TODAY).
+        config: Build configuration; supplies each table's timestamp columns.
 
     Returns:
         A tuple of the applied offset and the latest event time before the shift.
@@ -330,197 +593,41 @@ def shift_dates(
     Raises:
         DatabaseBuildError: If the tables contain no timestamps to anchor the shift on.
     """
-    latest = [dfs[t][c].max() for t, cols in TIMESTAMP_COLS.items() for c in cols]
+    ts_columns = [(t, c) for t, spec in config.tables.items() for c in spec.timestamp_columns]
+    latest = [dfs[t][c].max() for t, c in ts_columns]
     latest = [ts for ts in latest if pd.notna(ts)]
     if not latest:
         raise DatabaseBuildError("No timestamps found in the source data; cannot shift dates")
     anchor = max(latest)
-    offset = ((reference_now - anchor) // WEEK) * WEEK  # whole weeks, keeps weekdays
-    for t, cols in TIMESTAMP_COLS.items():
-        for c in cols:
-            dfs[t][c] = dfs[t][c] + offset
+    week = pd.Timedelta(weeks=1)
+    offset = ((reference_now - anchor) // week) * week  # whole weeks, keeps weekdays
+    for t, c in ts_columns:
+        dfs[t][c] = dfs[t][c] + offset
     return offset, anchor
 
 
 # --------------------------------------------------------------------------- write
-SCHEMA = """
-PRAGMA foreign_keys = ON;
-
-CREATE TABLE meta (
-    key   TEXT PRIMARY KEY,
-    value TEXT NOT NULL
-);
-
-CREATE TABLE distribution_centers (
-    id        INTEGER PRIMARY KEY,
-    name      TEXT NOT NULL,
-    latitude  REAL,
-    longitude REAL
-);
-
-CREATE TABLE products (
-    id                     INTEGER PRIMARY KEY,
-    name                   TEXT,
-    brand                  TEXT,
-    category               TEXT NOT NULL,
-    department             TEXT NOT NULL,
-    cost                   REAL NOT NULL,
-    retail_price           REAL NOT NULL,
-    sku                    TEXT NOT NULL UNIQUE,
-    distribution_center_id INTEGER NOT NULL REFERENCES distribution_centers(id)
-);
-
-CREATE TABLE users (
-    id             INTEGER PRIMARY KEY,
-    first_name     TEXT NOT NULL,
-    last_name      TEXT NOT NULL,
-    email          TEXT NOT NULL UNIQUE COLLATE NOCASE,
-    age            INTEGER,
-    gender         TEXT,
-    street_address TEXT,
-    postal_code    TEXT NOT NULL,
-    city           TEXT,
-    state          TEXT,
-    country        TEXT,
-    latitude       REAL,
-    longitude      REAL,
-    traffic_source TEXT,
-    created_at     TEXT NOT NULL
-);
-
-CREATE TABLE orders (
-    order_id     INTEGER PRIMARY KEY,
-    user_id      INTEGER NOT NULL REFERENCES users(id),
-    status       TEXT NOT NULL
-                 CHECK (status IN ('Processing','Shipped','Complete','Returned','Cancelled')),
-    gender       TEXT,
-    num_of_item  INTEGER NOT NULL,
-    created_at   TEXT NOT NULL,
-    shipped_at   TEXT,
-    delivered_at TEXT,
-    returned_at  TEXT
-);
-
-CREATE TABLE order_items (
-    id                INTEGER PRIMARY KEY,
-    order_id          INTEGER NOT NULL REFERENCES orders(order_id),
-    user_id           INTEGER NOT NULL REFERENCES users(id),
-    product_id        INTEGER NOT NULL REFERENCES products(id),
-    inventory_item_id INTEGER,  -- inventory_items table not loaded
-    status            TEXT NOT NULL
-                      CHECK (status IN ('Processing','Shipped','Complete','Returned','Cancelled')),
-    sale_price        REAL NOT NULL,
-    created_at        TEXT NOT NULL,
-    shipped_at        TEXT,
-    delivered_at      TEXT,
-    returned_at       TEXT
-);
-
--- Milestone 2 (writes): empty for now
-CREATE TABLE return_requests (
-    return_id     INTEGER PRIMARY KEY AUTOINCREMENT,
-    order_id      INTEGER NOT NULL REFERENCES orders(order_id),
-    order_item_id INTEGER NOT NULL UNIQUE REFERENCES order_items(id),
-    refund_amount REAL NOT NULL,
-    reason        TEXT,
-    status        TEXT NOT NULL DEFAULT 'requested',
-    created_at    TEXT NOT NULL
-);
-
-CREATE TABLE support_tickets (
-    ticket_id   INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id     INTEGER NOT NULL REFERENCES users(id),
-    order_id    INTEGER REFERENCES orders(order_id),
-    category    TEXT NOT NULL CHECK (category IN ('stuck_order','lost_package','other')),
-    description TEXT,
-    status      TEXT NOT NULL DEFAULT 'open',
-    created_at  TEXT NOT NULL
-);
-CREATE UNIQUE INDEX one_open_ticket_per_order ON support_tickets(order_id)
-    WHERE status = 'open' AND order_id IS NOT NULL;
-
-CREATE INDEX idx_orders_user        ON orders(user_id, created_at);
-CREATE INDEX idx_items_order        ON order_items(order_id);
-CREATE INDEX idx_items_user         ON order_items(user_id);
-CREATE INDEX idx_items_product      ON order_items(product_id);
-CREATE INDEX idx_users_email_postal ON users(email, postal_code);
-"""
-
-COLUMNS = {
-    "distribution_centers": ["id", "name", "latitude", "longitude"],
-    "products": [
-        "id",
-        "name",
-        "brand",
-        "category",
-        "department",
-        "cost",
-        "retail_price",
-        "sku",
-        "distribution_center_id",
-    ],
-    "users": [
-        "id",
-        "first_name",
-        "last_name",
-        "email",
-        "age",
-        "gender",
-        "street_address",
-        "postal_code",
-        "city",
-        "state",
-        "country",
-        "latitude",
-        "longitude",
-        "traffic_source",
-        "created_at",
-    ],
-    "orders": [
-        "order_id",
-        "user_id",
-        "status",
-        "gender",
-        "num_of_item",
-        "created_at",
-        "shipped_at",
-        "delivered_at",
-        "returned_at",
-    ],
-    "order_items": [
-        "id",
-        "order_id",
-        "user_id",
-        "product_id",
-        "inventory_item_id",
-        "status",
-        "sale_price",
-        "created_at",
-        "shipped_at",
-        "delivered_at",
-        "returned_at",
-    ],
-}
-
-
-def _to_sql_values(df: pd.DataFrame, table: str) -> list[tuple[object, ...]]:
+def _to_sql_values(df: pd.DataFrame, table: str, config: BuildConfig) -> list[tuple[object, ...]]:
     """Convert a table to rows ready for ``executemany``.
 
     Args:
         df: The table to convert.
         table: Table name, used to pick the column order and the timestamp columns.
+        config: Build configuration.
 
     Returns:
         One tuple per row, with timestamps as text and missing values as ``None``.
     """
-    df = df[COLUMNS[table]].copy()
-    for c in TIMESTAMP_COLS.get(table, []):
-        df[c] = df[c].dt.strftime(TS_FMT)
+    df = df[config.schema_info.columns[table]].copy()
+    for c in config.tables[table].timestamp_columns:
+        df[c] = df[c].dt.strftime(config.timestamp_format)
     df = df.astype(object).where(df.notna(), None)
     return list(df.itertuples(index=False, name=None))
 
 
-def write(dfs: dict[str, pd.DataFrame], out: Path, meta: dict[str, str]) -> None:
+def write(
+    dfs: dict[str, pd.DataFrame], out: Path, meta: dict[str, str], config: BuildConfig
+) -> None:
     """Write the tables and metadata to a new SQLite database.
 
     Any existing file at ``out`` is replaced. Callers should pass a temporary path and
@@ -530,6 +637,7 @@ def write(dfs: dict[str, pd.DataFrame], out: Path, meta: dict[str, str]) -> None
         dfs: Cleaned and shifted tables.
         out: Path of the SQLite file to create.
         meta: Key/value pairs for the ``meta`` table, including ``reference_now``.
+        config: Build configuration; supplies the schema and insert order.
 
     Raises:
         DatabaseBuildError: If SQLite rejects the schema or a table's rows.
@@ -538,14 +646,14 @@ def write(dfs: dict[str, pd.DataFrame], out: Path, meta: dict[str, str]) -> None
     step = "schema"
     try:
         with closing(sqlite3.connect(out)) as con:
-            con.executescript(SCHEMA)
-            for table in ["distribution_centers", "products", "users", "orders", "order_items"]:
+            con.executescript(config.schema)
+            for table in config.insert_order:
                 step = f"table '{table}'"
-                cols = COLUMNS[table]
+                cols = config.schema_info.columns[table]
                 placeholders = ", ".join("?" * len(cols))
                 con.executemany(
                     f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({placeholders})",
-                    _to_sql_values(dfs[table], table),
+                    _to_sql_values(dfs[table], table, config),
                 )
             step = "table 'meta'"
             con.executemany("INSERT INTO meta VALUES (?, ?)", meta.items())
@@ -555,36 +663,12 @@ def write(dfs: dict[str, pd.DataFrame], out: Path, meta: dict[str, str]) -> None
 
 
 # --------------------------------------------------------------------------- validate
-CHECKS = {
-    "foreign keys": "SELECT COUNT(*) FROM pragma_foreign_key_check",
-    "duplicate emails": "SELECT COUNT(*) - COUNT(DISTINCT lower(email)) FROM users",
-    "order chronology": """SELECT COUNT(*) FROM orders WHERE shipped_at < created_at
-                           OR delivered_at < shipped_at OR returned_at < delivered_at""",
-    "item chronology": """SELECT COUNT(*) FROM order_items WHERE shipped_at < created_at
-                          OR delivered_at < shipped_at OR returned_at < delivered_at""",
-    "events after TODAY": """SELECT COUNT(*) FROM orders, meta m WHERE m.key='reference_now'
-                             AND max(created_at, ifnull(shipped_at,''), ifnull(delivered_at,''),
-                                     ifnull(returned_at,'')) > m.value""",
-    "status vs timestamps": """SELECT COUNT(*) FROM orders WHERE
-            (status IN ('Processing','Cancelled')
-                AND (shipped_at IS NOT NULL OR delivered_at IS NOT NULL))
-         OR (status = 'Shipped'  AND (shipped_at IS NULL OR delivered_at IS NOT NULL))
-         OR (status = 'Complete' AND (delivered_at IS NULL OR returned_at IS NOT NULL))
-         OR (status = 'Returned' AND returned_at IS NULL)""",
-    "item count mismatch": """SELECT COUNT(*) FROM orders o
-                              JOIN (SELECT order_id, COUNT(*) n FROM order_items
-                                    GROUP BY order_id) i
-                              USING (order_id) WHERE o.num_of_item <> i.n""",
-    "item/order status mismatch": """SELECT COUNT(*) FROM order_items i
-                                     JOIN orders o USING (order_id) WHERE i.status <> o.status""",
-}
-
-
-def validate(db: Path) -> list[str]:
+def validate(db: Path, config: BuildConfig) -> list[str]:
     """Run integrity checks on a built database and log a report.
 
     Args:
         db: Path of the SQLite file to check.
+        config: Build configuration; supplies the checks and the tables to count.
 
     Returns:
         Names of the checks that found violations; empty if all passed.
@@ -592,14 +676,14 @@ def validate(db: Path) -> list[str]:
     failed: list[str] = []
     logger.info("Validating {}", db)
     with closing(sqlite3.connect(db)) as con:
-        for name, sql in CHECKS.items():
+        for name, sql in config.checks.items():
             n = con.execute(sql).fetchone()[0]
             if n == 0:
                 logger.info("  OK   {}: {}", name, n)
             else:
                 failed.append(name)
                 logger.error("  FAIL {}: {}", name, n)
-        for t in TABLES:
+        for t in config.tables:
             count = con.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
             logger.info("  rows {}: {:,}", t, count)
     return failed
@@ -645,7 +729,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
-def build(data_dir: Path, out: Path, today: date, seed: int) -> None:
+def build(data_dir: Path, out: Path, today: date, seed: int, config: BuildConfig) -> None:
     """Build and validate the database, replacing ``out`` only if validation passes.
 
     The database is written to ``<out>.tmp`` first. On success it atomically replaces
@@ -657,27 +741,29 @@ def build(data_dir: Path, out: Path, today: date, seed: int) -> None:
         out: Path of the SQLite file to produce.
         today: Reference date (TODAY) stored in the ``meta`` table.
         seed: Seed for the email deduplication.
+        config: Build configuration, usually from :func:`default_config`.
 
     Raises:
         DatabaseBuildError: If the inputs, source data, write or validation fail.
     """
     reference_now = pd.Timestamp(f"{today.isoformat()} 00:00:00", tz="UTC")
+    ts_format = config.timestamp_format
     logger.info("Building {} from {} (TODAY = {})", out, data_dir, today)
 
-    check_inputs(data_dir)
+    check_inputs(data_dir, config)
     logger.info("Loading CSVs")
-    dfs = load(data_dir)
+    dfs = load(data_dir, config)
     logger.info("Checking source data")
-    check_source_data(dfs)
+    check_source_data(dfs, config)
     logger.info("Cleaning tables")
-    dfs = clean(dfs)
+    dfs = clean(dfs, config)
 
-    offset, anchor = shift_dates(dfs, reference_now)
+    offset, anchor = shift_dates(dfs, reference_now, config)
     logger.info(
         "Shifted timestamps by {} days ({} weeks); source latest event {}",
         offset.days,
         offset.days // 7,
-        anchor.strftime(TS_FMT),
+        anchor.strftime(ts_format),
     )
 
     users = dfs["users"]
@@ -686,11 +772,11 @@ def build(data_dir: Path, out: Path, today: date, seed: int) -> None:
     logger.info("Made emails unique: {:,} changed", (users["email"] != original).sum())
 
     meta = {
-        "reference_now": reference_now.strftime(TS_FMT),
+        "reference_now": reference_now.strftime(ts_format),
         "date_shift_days": str(offset.days),
-        "source_latest_event": anchor.strftime(TS_FMT),
+        "source_latest_event": anchor.strftime(ts_format),
         "email_seed": str(seed),
-        "built_at": datetime.now(UTC).strftime(TS_FMT),
+        "built_at": datetime.now(UTC).strftime(ts_format),
     }
 
     tmp = out.with_name(out.name + ".tmp")
@@ -698,8 +784,8 @@ def build(data_dir: Path, out: Path, today: date, seed: int) -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
     try:
         logger.info("Writing {}", tmp)
-        write(dfs, tmp, meta)
-        failures = validate(tmp)
+        write(dfs, tmp, meta, config)
+        failures = validate(tmp, config)
         if failures:
             tmp.replace(failed_copy)
             raise DatabaseBuildError(
@@ -731,7 +817,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     today = args.today or datetime.now(UTC).date()
     try:
-        build(args.data_dir, args.out, today, args.seed)
+        build(args.data_dir, args.out, today, args.seed, default_config())
     except DatabaseBuildError as e:
         logger.error("Build failed: {}", e)
         return 1

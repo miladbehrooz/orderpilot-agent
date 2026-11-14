@@ -11,12 +11,18 @@ import pytest
 from pytest_mock import MockerFixture
 
 import build_db
-from build_db import build, main, parse_args
+from build_db import BuildConfig, build, default_config, main, parse_args
 from orderpilot.errors import DatabaseBuildError
 
 TODAY = date(2026, 11, 12)
 
 WriteCsvs = Callable[[dict[str, pd.DataFrame]], Path]
+
+
+@pytest.fixture
+def config() -> BuildConfig:
+    """Return the real build configuration (schema, checks, table specs)."""
+    return default_config()
 
 
 @pytest.fixture
@@ -122,11 +128,14 @@ def _sha256(path: Path) -> str:
 
 
 def test_build_creates_valid_database(
-    tables: dict[str, pd.DataFrame], write_csvs: WriteCsvs, tmp_path: Path
+    tables: dict[str, pd.DataFrame],
+    write_csvs: WriteCsvs,
+    tmp_path: Path,
+    config: BuildConfig,
 ) -> None:
     """A valid dataset builds a database with unique emails and no leftover temp file."""
     out = tmp_path / "out" / "ecommerce.sqlite"  # parent folder does not exist yet
-    build(write_csvs(tables), out, TODAY, seed=42)
+    build(write_csvs(tables), out, TODAY, seed=42, config=config)
 
     assert out.is_file()
     assert not out.with_name("ecommerce.sqlite.tmp").exists()
@@ -135,70 +144,88 @@ def test_build_creates_valid_database(
     assert len(emails) == len(set(emails)) == 2
 
 
-def test_missing_data_dir_raises(tmp_path: Path) -> None:
+def test_missing_data_dir_raises(tmp_path: Path, config: BuildConfig) -> None:
     """A non-existent data directory fails with a clear message."""
     with pytest.raises(DatabaseBuildError, match="Data directory not found"):
-        build(tmp_path / "nope", tmp_path / "db.sqlite", TODAY, seed=42)
+        build(tmp_path / "nope", tmp_path / "db.sqlite", TODAY, seed=42, config=config)
 
 
 def test_missing_csvs_are_all_listed(
-    tables: dict[str, pd.DataFrame], write_csvs: WriteCsvs, tmp_path: Path
+    tables: dict[str, pd.DataFrame],
+    write_csvs: WriteCsvs,
+    tmp_path: Path,
+    config: BuildConfig,
 ) -> None:
     """Every missing CSV is named in one error, not just the first."""
     del tables["orders"], tables["products"]
     with pytest.raises(DatabaseBuildError, match=r"orders\.csv, products\.csv"):
-        build(write_csvs(tables), tmp_path / "db.sqlite", TODAY, seed=42)
+        build(write_csvs(tables), tmp_path / "db.sqlite", TODAY, seed=42, config=config)
 
 
 def test_missing_column_raises(
-    tables: dict[str, pd.DataFrame], write_csvs: WriteCsvs, tmp_path: Path
+    tables: dict[str, pd.DataFrame],
+    write_csvs: WriteCsvs,
+    tmp_path: Path,
+    config: BuildConfig,
 ) -> None:
     """A CSV without a required column names the file and the column."""
     tables["orders"] = tables["orders"].drop(columns=["status"])
     with pytest.raises(DatabaseBuildError, match=r"orders\.csv is missing columns: status"):
-        build(write_csvs(tables), tmp_path / "db.sqlite", TODAY, seed=42)
+        build(write_csvs(tables), tmp_path / "db.sqlite", TODAY, seed=42, config=config)
 
 
 def test_unparseable_timestamp_raises(
-    tables: dict[str, pd.DataFrame], write_csvs: WriteCsvs, tmp_path: Path
+    tables: dict[str, pd.DataFrame],
+    write_csvs: WriteCsvs,
+    tmp_path: Path,
+    config: BuildConfig,
 ) -> None:
     """A malformed timestamp names the file and the column."""
     tables["orders"].loc[0, "shipped_at"] = "not a date"
     with pytest.raises(
         DatabaseBuildError, match=r"orders\.csv: cannot parse timestamps in 'shipped_at'"
     ):
-        build(write_csvs(tables), tmp_path / "db.sqlite", TODAY, seed=42)
+        build(write_csvs(tables), tmp_path / "db.sqlite", TODAY, seed=42, config=config)
 
 
 def test_orphan_order_item_raises(
-    tables: dict[str, pd.DataFrame], write_csvs: WriteCsvs, tmp_path: Path
+    tables: dict[str, pd.DataFrame],
+    write_csvs: WriteCsvs,
+    tmp_path: Path,
+    config: BuildConfig,
 ) -> None:
     """An order item pointing at a non-existent order fails before cleaning."""
     tables["order_items"].loc[1, "order_id"] = 999
     with pytest.raises(
         DatabaseBuildError, match=r"order_items: order_id not found \(1 rows, e\.g\. 999\)"
     ):
-        build(write_csvs(tables), tmp_path / "db.sqlite", TODAY, seed=42)
+        build(write_csvs(tables), tmp_path / "db.sqlite", TODAY, seed=42, config=config)
 
 
 def test_duplicate_order_id_raises(
-    tables: dict[str, pd.DataFrame], write_csvs: WriteCsvs, tmp_path: Path
+    tables: dict[str, pd.DataFrame],
+    write_csvs: WriteCsvs,
+    tmp_path: Path,
+    config: BuildConfig,
 ) -> None:
     """Duplicate primary keys are reported with the offending ID."""
     tables["orders"].loc[1, "order_id"] = 1
     with pytest.raises(
         DatabaseBuildError, match=r"orders: duplicate order_id \(1 rows, e\.g\. 1\)"
     ):
-        build(write_csvs(tables), tmp_path / "db.sqlite", TODAY, seed=42)
+        build(write_csvs(tables), tmp_path / "db.sqlite", TODAY, seed=42, config=config)
 
 
 def test_malformed_email_raises(
-    tables: dict[str, pd.DataFrame], write_csvs: WriteCsvs, tmp_path: Path
+    tables: dict[str, pd.DataFrame],
+    write_csvs: WriteCsvs,
+    tmp_path: Path,
+    config: BuildConfig,
 ) -> None:
     """An email without '@' is reported before the deduplication step can crash."""
     tables["users"].loc[0, "email"] = "no-at-sign"
     with pytest.raises(DatabaseBuildError, match="missing or malformed email"):
-        build(write_csvs(tables), tmp_path / "db.sqlite", TODAY, seed=42)
+        build(write_csvs(tables), tmp_path / "db.sqlite", TODAY, seed=42, config=config)
 
 
 def test_validation_failure_keeps_previous_database(
@@ -206,18 +233,19 @@ def test_validation_failure_keeps_previous_database(
     write_csvs: WriteCsvs,
     tmp_path: Path,
     mocker: MockerFixture,
+    config: BuildConfig,
 ) -> None:
     """A failed validation leaves the existing database untouched and keeps a .failed copy."""
     out = tmp_path / "ecommerce.sqlite"
-    build(write_csvs(tables), out, TODAY, seed=42)
+    build(write_csvs(tables), out, TODAY, seed=42, config=config)
     before = _sha256(out)
 
     validate_spy = mocker.spy(build_db, "validate")
     tables["orders"].loc[0, "num_of_item"] = 2  # passes source checks, fails validation
     with pytest.raises(DatabaseBuildError, match="item count mismatch"):
-        build(write_csvs(tables), out, TODAY, seed=42)
+        build(write_csvs(tables), out, TODAY, seed=42, config=config)
 
-    validate_spy.assert_called_once_with(tmp_path / "ecommerce.sqlite.tmp")  # never `out`
+    validate_spy.assert_called_once_with(tmp_path / "ecommerce.sqlite.tmp", config)  # never `out`
     assert validate_spy.spy_return == ["item count mismatch"]
     assert _sha256(out) == before
     assert (tmp_path / "ecommerce.sqlite.failed").is_file()
@@ -229,13 +257,22 @@ def test_sqlite_error_is_reported_and_temp_file_removed(
     write_csvs: WriteCsvs,
     tmp_path: Path,
     mocker: MockerFixture,
+    config: BuildConfig,
 ) -> None:
     """A SQLite error during the write becomes a DatabaseBuildError naming the step."""
     # Patch where build_db looks it up.
-    mocker.patch("build_db.sqlite3.connect", side_effect=sqlite3.OperationalError("disk I/O error"))
+    real_connect = sqlite3.connect
+
+    def failing_connect(database: str | Path) -> sqlite3.Connection:
+        """Fail for the database file; allow the in-memory schema inspection."""
+        if database == ":memory:":
+            return real_connect(database)
+        raise sqlite3.OperationalError("disk I/O error")
+
+    mocker.patch("build_db.sqlite3.connect", side_effect=failing_connect)
     out = tmp_path / "ecommerce.sqlite"
     with pytest.raises(DatabaseBuildError, match=r"Failed writing schema .*: disk I/O error"):
-        build(write_csvs(tables), out, TODAY, seed=42)
+        build(write_csvs(tables), out, TODAY, seed=42, config=config)
     assert not out.exists()
     assert not (tmp_path / "ecommerce.sqlite.tmp").exists()
 
@@ -245,14 +282,15 @@ def test_interrupt_removes_temp_file_and_keeps_database(
     write_csvs: WriteCsvs,
     tmp_path: Path,
     mocker: MockerFixture,
+    config: BuildConfig,
 ) -> None:
     """Ctrl-C during the write exits with 130, removes the temp file and keeps the old DB."""
     data_dir = write_csvs(tables)
     out = tmp_path / "ecommerce.sqlite"
-    build(data_dir, out, TODAY, seed=42)
+    build(data_dir, out, TODAY, seed=42, config=config)
     before = _sha256(out)
 
-    def interrupted_write(dfs: object, path: Path, meta: object) -> None:
+    def interrupted_write(dfs: object, path: Path, meta: object, config: object) -> None:
         """Leave a partial file behind, then simulate Ctrl-C."""
         path.write_bytes(b"partial")
         raise KeyboardInterrupt
@@ -282,7 +320,9 @@ def test_main_passes_arguments_to_build(mocker: MockerFixture) -> None:
     mock_build = mocker.patch.object(build_db, "build", autospec=True)
     code = main(["--data-dir", "d", "--out", "o.sqlite", "--today", "2026-11-12", "--seed", "7"])
     assert code == 0
-    mock_build.assert_called_once_with(Path("d"), Path("o.sqlite"), date(2026, 11, 12), 7)
+    mock_build.assert_called_once_with(
+        Path("d"), Path("o.sqlite"), date(2026, 11, 12), 7, default_config()
+    )
 
 
 def test_main_defaults_today_to_current_utc_date(mocker: MockerFixture) -> None:
@@ -308,3 +348,18 @@ def test_main_exits_1_on_unexpected_error(mocker: MockerFixture) -> None:
     with pytest.raises(SystemExit) as exc:
         main([])
     assert exc.value.code == 1
+
+
+def test_schema_info_is_read_from_the_schema(config: BuildConfig) -> None:
+    """Columns, primary keys, foreign keys and insert order all come from the schema."""
+    info = config.schema_info
+    assert info.columns["orders"][:3] == ["order_id", "user_id", "status"]
+    assert info.primary_keys["orders"] == "order_id"
+    assert build_db.ForeignKey("orders", "user_id", "users", "id") in info.foreign_keys
+    assert config.insert_order == [
+        "distribution_centers",
+        "products",
+        "users",
+        "orders",
+        "order_items",
+    ]
