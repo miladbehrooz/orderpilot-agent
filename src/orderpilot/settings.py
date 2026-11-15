@@ -33,6 +33,12 @@ class Settings(BaseSettings):
             default) sends no temperature, which current Claude models require: they
             reject the parameter.
         AGENT_RECURSION_LIMIT: Maximum graph steps per agent run, so a looping model stops.
+        LANGSMITH_TRACING: Send traces of agent runs to LangSmith. Applied to the process
+            environment by :func:`orderpilot.tracing.configure_tracing`, because LangChain
+            reads these values from the environment, not from this class.
+        LANGSMITH_API_KEY: LangSmith API key, required when tracing is on.
+        LANGSMITH_PROJECT: LangSmith project that receives the traces.
+        LANGSMITH_ENDPOINT: LangSmith API URL; set only for a non-default region (e.g. EU).
         RETURN_WINDOW_DAYS: Days after delivery during which an order can be returned.
         STUCK_DAYS: Days an order can stay in Processing before it counts as stuck.
         LOST_DAYS: Days an order can stay in Shipped before it counts as lost.
@@ -59,6 +65,11 @@ class Settings(BaseSettings):
     LLM_MODEL: str | None = None
     LLM_TEMPERATURE: float | None = None
     AGENT_RECURSION_LIMIT: int = 25
+
+    LANGSMITH_TRACING: bool = False
+    LANGSMITH_API_KEY: SecretStr | None = None
+    LANGSMITH_PROJECT: str = "orderpilot"
+    LANGSMITH_ENDPOINT: str | None = None
 
     RETURN_WINDOW_DAYS: int = 30
     STUCK_DAYS: int = 7

@@ -15,12 +15,13 @@ from orderpilot.llm import LLMFactory
 from orderpilot.repository import OrderRepository, SqliteOrderRepository
 from orderpilot.settings import settings
 from orderpilot.tools import build_tools
+from orderpilot.tracing import configure_tracing
 
 
 def build_agent(
     *, checkpointer: Checkpointer = None, repo: OrderRepository | None = None
 ) -> AgentGraph:
-    """Build the support agent from settings.
+    """Build the support agent from settings, turning on LangSmith tracing if configured.
 
     Args:
         checkpointer: Optional checkpointer for multi-turn conversations.
@@ -35,6 +36,7 @@ def build_agent(
     """
     if settings.LLM_PROVIDER is None or settings.LLM_MODEL is None:
         raise LLMConfigError("Set LLM_PROVIDER and LLM_MODEL in .env")
+    configure_tracing()
     repo = repo or SqliteOrderRepository(settings.DB_PATH)
     options: dict[str, Any] = {}
     if settings.LLM_TEMPERATURE is not None:  # current Claude models reject temperature

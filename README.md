@@ -26,5 +26,10 @@
 
 A terminal chat is also available: `uv run python -m orderpilot`.
 
+**Tracing:** set `LANGSMITH_TRACING=true` and `LANGSMITH_API_KEY` in `.env` to send every run
+(model calls, tool calls, tokens, latency) to the LangSmith project `LANGSMITH_PROJECT`. This
+works for every entry point, since building the agent copies these values into the environment.
+Tests never trace.
+
 The graph's input accepts only `messages`. Other keys sent by a client (for example `user_id`)
 are dropped, so a customer can only be identified through `verify_customer`.

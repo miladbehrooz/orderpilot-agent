@@ -11,6 +11,17 @@ from orderpilot.settings import settings
 from tests.stubs import STUB_USER, StubRepository
 
 
+@pytest.fixture(autouse=True)
+def _no_tracing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep LangSmith tracing off in every test, whatever .env says.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    monkeypatch.setattr(settings, "LANGSMITH_TRACING", False)
+    monkeypatch.setenv("LANGSMITH_TRACING", "false")
+
+
 @pytest.fixture
 def stub_repo() -> StubRepository:
     """Return a stub repository holding ``STUB_USER``.
