@@ -224,3 +224,6 @@ data/
 *.sqlite
 *.sqlite3
 .DS_Store
+*.sqlite.tmp
+*.sqlite.failed
+.langgraph_api/
