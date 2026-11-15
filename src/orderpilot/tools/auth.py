@@ -8,8 +8,8 @@ from langgraph.types import Command
 
 from orderpilot.agent.state import AgentState, is_verified
 from orderpilot.repository import OrderRepository
+from orderpilot.services import ReasonCode, ToolResult
 from orderpilot.services import auth as auth_service
-from orderpilot.services.results import ReasonCode, ToolResult
 from orderpilot.settings import settings
 
 VERIFY_TOOL_NAME: Final = "verify_customer"

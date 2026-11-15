@@ -36,7 +36,7 @@ from pathlib import Path
 import pandas as pd
 
 from orderpilot.errors import DatabaseBuildError
-from orderpilot.logging import logger
+from orderpilot.observability import logger
 
 
 # --------------------------------------------------------------------------- config

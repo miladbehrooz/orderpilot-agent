@@ -10,10 +10,10 @@ from pathlib import Path
 
 import pytest
 
-from orderpilot.db import parse_timestamp
 from orderpilot.domain import OrderStatus, User
 from orderpilot.errors import RepositoryError
 from orderpilot.repository import SqliteOrderRepository
+from orderpilot.repository.db import parse_timestamp
 from orderpilot.settings import settings
 from tests.shop_data import ShopData
 

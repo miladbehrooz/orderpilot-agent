@@ -6,9 +6,9 @@ from contextlib import closing
 from datetime import date, datetime
 from pathlib import Path
 
-from orderpilot.db import connect, parse_timestamp
 from orderpilot.domain import Order, OrderItem, OrderStatus, User
 from orderpilot.errors import RepositoryError
+from orderpilot.repository.db import connect, parse_timestamp
 
 
 def _optional_timestamp(value: str | None) -> datetime | None:
@@ -106,7 +106,7 @@ def _load_items(con: sqlite3.Connection, order_ids: Sequence[int]) -> dict[int, 
 class SqliteOrderRepository:
     """``OrderRepository`` backed by the SQLite file built by ``scripts/build_db.py``.
 
-    Each method opens its own short-lived connection (see :func:`orderpilot.db.connect`).
+    Each method opens its own short-lived connection (see :func:`orderpilot.repository.db.connect`).
 
     Args:
         db_path: Path to the SQLite database.

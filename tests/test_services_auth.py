@@ -7,8 +7,8 @@ import pytest
 
 from orderpilot.domain import User
 from orderpilot.repository import OrderRepository, SqliteOrderRepository
+from orderpilot.services import ReasonCode, VerificationOutcome
 from orderpilot.services.auth import verify_customer
-from orderpilot.services.results import ReasonCode, VerificationOutcome
 from tests.stubs import STUB_USER, StubRepository
 
 MAX = 3
