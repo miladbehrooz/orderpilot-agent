@@ -80,10 +80,11 @@ uv run python -m orderpilot               # terminal chat with the agent
 - **No unnecessary module-level constants.** Before adding an `UPPER_CASE = ...` global, use the first option that fits:
   1. **A local variable** if only one function uses the value (e.g. `week = pd.Timedelta(weeks=1)` inside `shift_dates`).
   2. **Derive it** from an existing source of truth instead of repeating it (e.g. read column lists from the SQLite schema with `PRAGMA table_info`, not a hand-written list).
-  3. **A field on `Settings`** for runtime configuration or business policy (e.g. `RETURN_WINDOW_DAYS`, `LOG_LEVEL`).
-  4. **A frozen dataclass config** created by a `default_config()` function and passed in explicitly, for fixed structural settings of a script or module (see `BuildConfig` in `scripts/build_db.py`).
+  3. **A field on `Settings`** for runtime configuration or business policy (e.g. `RETURN_WINDOW_DAYS`, `LOG_LEVEL`), read from the `settings` singleton (see below).
+  4. **A frozen dataclass config** created by a `default_config()` function and passed in explicitly, for fixed structural settings of a script in `scripts/` (see `BuildConfig` in `scripts/build_db.py`).
   5. **A pytest fixture** for test data (e.g. `today`), not a module-level `TODAY = ...`.
-- Pass configuration in as arguments; functions must not read module globals for settings.
+- **Inside `src/orderpilot/` (and `evals/`), runtime configuration and policy values are read directly from the `settings` singleton** (`from orderpilot.settings import settings`) where they are needed, e.g. `settings.MAX_AUTH_ATTEMPTS` in `make_verify_customer` or `is_locked`. Don't thread `Settings` or individual policy values through function arguments. In tests, override a value with `mocker.patch.object(settings, "RETURN_WINDOW_DAYS", 10)`.
+- **Scripts in `scripts/` are offline tooling outside the core and don't read `settings`**: their inputs come from CLI arguments, and their fixed structural settings from a `default_config()` dataclass passed in explicitly (option 4, e.g. `BuildConfig`). This keeps a build reproducible from its command line alone, independent of `.env`. The `logger` singleton may still be used.
 - Exceptions: `settings.py` (e.g. `PROJECT_ROOT`), `__all__`, `__version__`, type aliases, and the `logger`/`settings` singletons.
 
 ## Testing

@@ -1,8 +1,8 @@
 """Test doubles that stand in for the data layer, so most tests need no database."""
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
-from orderpilot.domain import User
+from orderpilot.domain import Order, OrderStatus, User
 
 STUB_TODAY = datetime(2026, 11, 12, tzinfo=UTC)
 STUB_USER = User(
@@ -42,3 +42,38 @@ class StubRepository:
             The matching user, or ``None``.
         """
         return self._users.get(email.casefold())
+
+    def list_orders(
+        self,
+        user_id: int,
+        *,
+        status: OrderStatus | None,
+        created_from: date | None,
+        created_to: date | None,
+        limit: int,
+    ) -> list[Order]:
+        """Return no orders: the stub only knows accounts.
+
+        Args:
+            user_id: Ignored.
+            status: Ignored.
+            created_from: Ignored.
+            created_to: Ignored.
+            limit: Ignored.
+
+        Returns:
+            An empty list.
+        """
+        return []
+
+    def get_order(self, user_id: int, order_id: int) -> Order | None:
+        """Return no order: the stub only knows accounts.
+
+        Args:
+            user_id: Ignored.
+            order_id: Ignored.
+
+        Returns:
+            ``None``.
+        """
+        return None
