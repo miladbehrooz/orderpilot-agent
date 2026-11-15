@@ -7,7 +7,7 @@ _Draft, 2026-11-12. Derived from `scenarios.md`._
 2. **`user_id` comes from graph state and is never a tool argument.** Tools read it via LangChain `ToolRuntime` (`runtime.state`), which replaces the older `InjectedState`. The model has no way to pass another user's ID (S1).
 3. **Defense in depth for auth.** Before verification, only `verify_customer` is bound to the model. Every other tool also refuses with `NOT_VERIFIED` if called (AU5).
 4. **"Not yours" looks like "doesn't exist".** Both return `NOT_FOUND`, so order IDs can't be probed (S1, AM2).
-5. **Structured outputs with reason codes:** `ELIGIBLE`, `NOT_FOUND`, `NOT_VERIFIED`, `ALREADY_SHIPPED`, `NOT_DELIVERED`, `WINDOW_EXPIRED`, `ALREADY_RETURNED`, `ORDER_CANCELLED`. Auth adds `VERIFIED`, `NOT_MATCHED`, `MISSING_DETAILS`, `LOCKED`, `ALREADY_VERIFIED`. Any tool can return `INVALID_ARGUMENTS` (bad tool-call arguments) or `INTERNAL_ERROR` (unexpected failure, logged, details hidden). Evals check reason codes, not only the reply text.
+5. **Structured outputs with reason codes:** `OK` (a lookup succeeded), `ELIGIBLE`, `NOT_FOUND`, `NOT_VERIFIED`, `ALREADY_SHIPPED`, `NOT_DELIVERED`, `WINDOW_EXPIRED`, `ALREADY_RETURNED`, `ORDER_CANCELLED`. Auth adds `VERIFIED`, `NOT_MATCHED`, `MISSING_DETAILS`, `LOCKED`, `ALREADY_VERIFIED`. Any tool can return `INVALID_ARGUMENTS` (bad tool-call arguments) or `INTERNAL_ERROR` (unexpected failure, logged, details hidden). Evals check reason codes, not only the reply text.
 6. **Policy constants in one config file:** `RETURN_WINDOW_DAYS=30`, `STUCK_DAYS=7`, `LOST_DAYS=14`, `MAX_AUTH_ATTEMPTS=3`. `TODAY` is read from the database's `meta.reference_now`, set when the database is built.
 
 ## Milestone 1: Read tools
@@ -21,12 +21,18 @@ _Draft, 2026-11-12. Derived from `scenarios.md`._
 - Scenarios: AU1–AU6
 
 ### 2. `list_my_orders(status=None, date_from=None, date_to=None, limit=10)`
-- Returns order summaries: `order_id`, status, created/shipped/delivered dates, item count, total, and flags `is_stuck` / `is_possibly_lost`.
+- Arguments are validated by the tool schema: `status` is one of the five order statuses, `date_from`/`date_to` are `YYYY-MM-DD` dates (inclusive, on the order date), `limit` is 1–50. Invalid values return `INVALID_ARGUMENTS`, and so does `date_from` after `date_to`.
+- Returns `OK` with `orders` (newest first) and `has_more` (more orders match than `limit`). No orders is `OK` with `orders: []` (L6).
+- Each order summary: `order_id`, `status`, `created_on` / `shipped_on` / `delivered_on` / `returned_on` (dates, omitted when unset), `item_count`, `total`, `days_in_status` (calendar days since the current status began), flags `is_stuck` / `is_possibly_lost`, and `refund_total` when items were returned.
 - Scenarios: L1, L2, L4, L6, Q1, Q2
 
 ### 3. `get_order_details(order_id)`
-- Returns the order plus items: `order_item_id`, product name, brand, category, `sale_price`, item status and timestamps. A missing name/brand comes back as `null`.
+- Returns `OK` with `order`: the same summary as above plus `items`, each with `order_item_id`, `product_name`, `brand`, `category`, `sale_price`, `status` and its dates. A missing name/brand is an explicit `null` (Q3), so the model can see it is missing.
+- An order that doesn't exist or belongs to another user returns `NOT_FOUND` with nothing else; the two cases are identical (AM2, S1).
+- Never returns `user_id`, `product_id` or `inventory_item_id`.
 - Scenarios: L3, L5, Q3, AM1, AM2, S1
+
+The stuck/lost flags and day counts come from pure functions in `src/orderpilot/policy.py` (counted in calendar days against `meta.reference_now`), which the eligibility and write tools will share.
 
 ### 4. `check_cancellation_eligibility(order_id)`
 - Returns `{eligible, reason_code, explanation}`.

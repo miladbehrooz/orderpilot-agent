@@ -4,7 +4,7 @@ import json
 from typing import cast
 
 import pytest
-from langchain.tools import BaseTool, tool
+from langchain.tools import BaseTool
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_openai import ChatOpenAI
@@ -28,15 +28,9 @@ from orderpilot.tools import VERIFY_TOOL_NAME, build_tools
 from tests.stubs import StubRepository
 
 
-@tool
-def list_my_orders() -> str:
-    """Stand-in for a customer tool; never executed in these tests."""
-    return "[]"
-
-
 @pytest.fixture
 def tools(stub_repo: StubRepository) -> list[BaseTool]:
-    """Return verify_customer plus one customer tool.
+    """Return every agent tool, bound to the stub repository.
 
     Args:
         stub_repo: Stub repository.
@@ -44,7 +38,7 @@ def tools(stub_repo: StubRepository) -> list[BaseTool]:
     Returns:
         The tool list.
     """
-    return [*build_tools(stub_repo), list_my_orders]
+    return build_tools(stub_repo)
 
 
 @pytest.fixture
@@ -88,7 +82,10 @@ def test_verify_tool_dropped_after_verification(tools: list[BaseTool]) -> None:
     Args:
         tools: Agent tools.
     """
-    assert [t.name for t in select_tools(_state(user_id=1), tools)] == ["list_my_orders"]
+    assert [t.name for t in select_tools(_state(user_id=1), tools)] == [
+        "list_my_orders",
+        "get_order_details",
+    ]
 
 
 @pytest.mark.parametrize(
@@ -136,14 +133,18 @@ def test_unexpected_tool_error_is_structured_and_hides_details() -> None:
     assert content == {"reason_code": "INTERNAL_ERROR"}
 
 
-def test_build_graph_requires_verify_tool(unreachable_model: ChatOpenAI) -> None:
+def test_build_graph_requires_verify_tool(
+    unreachable_model: ChatOpenAI, tools: list[BaseTool]
+) -> None:
     """The graph refuses to build without verify_customer (the auth gate needs it).
 
     Args:
         unreachable_model: Model that is never called.
+        tools: Agent tools.
     """
+    without_verify = [t for t in tools if t.name != VERIFY_TOOL_NAME]
     with pytest.raises(ValueError, match=VERIFY_TOOL_NAME):
-        build_graph(unreachable_model, [list_my_orders], system_prompt="x")
+        build_graph(unreachable_model, without_verify, system_prompt="x")
 
 
 def test_graph_has_expected_nodes(unreachable_model: ChatOpenAI, tools: list[BaseTool]) -> None:

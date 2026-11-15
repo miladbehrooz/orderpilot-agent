@@ -4,10 +4,10 @@ Services and tools only use :class:`OrderRepository`, never a concrete database,
 the storage can change (SQLite, Postgres, a remote service) without touching them.
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Protocol
 
-from orderpilot.domain import User
+from orderpilot.domain import Order, OrderStatus, User
 
 
 class OrderRepository(Protocol):
@@ -33,6 +33,41 @@ class OrderRepository(Protocol):
 
         Returns:
             The matching user, or ``None`` if there is none.
+        """
+        ...
+
+    def list_orders(
+        self,
+        user_id: int,
+        *,
+        status: OrderStatus | None,
+        created_from: date | None,
+        created_to: date | None,
+        limit: int,
+    ) -> list[Order]:
+        """Return a user's orders, newest first, with their items.
+
+        Args:
+            user_id: The verified customer.
+            status: Only orders with this status, or all statuses if ``None``.
+            created_from: Only orders placed on or after this date (UTC), if given.
+            created_to: Only orders placed on or before this date (UTC), if given.
+            limit: Maximum number of orders to return.
+
+        Returns:
+            At most ``limit`` orders, newest first.
+        """
+        ...
+
+    def get_order(self, user_id: int, order_id: int) -> Order | None:
+        """Return one of the user's orders with its items.
+
+        Args:
+            user_id: The verified customer.
+            order_id: The order to look up.
+
+        Returns:
+            The order, or ``None`` if it doesn't exist or belongs to another user.
         """
         ...
 

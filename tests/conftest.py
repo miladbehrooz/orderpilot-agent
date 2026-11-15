@@ -1,13 +1,16 @@
-"""Shared fixtures: an in-memory stub repository and the real SQLite database."""
+"""Shared fixtures: a stub repository, a small test shop database and the real database."""
 
 import sqlite3
 from contextlib import closing
+from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 
 from orderpilot.domain import User
 from orderpilot.repository import SqliteOrderRepository
 from orderpilot.settings import settings
+from tests.shop_data import ShopData, build_shop_db
 from tests.stubs import STUB_USER, StubRepository
 
 
@@ -30,6 +33,43 @@ def stub_repo() -> StubRepository:
         The stub repository.
     """
     return StubRepository([STUB_USER])
+
+
+@pytest.fixture
+def today() -> datetime:
+    """Return TODAY of the test shop (its ``meta.reference_now``).
+
+    Returns:
+        2026-11-12 at midnight UTC.
+    """
+    return datetime(2026, 11, 12, tzinfo=UTC)
+
+
+@pytest.fixture
+def shop(tmp_path: Path, today: datetime) -> ShopData:
+    """Build a fresh test shop database for one test.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        today: TODAY of the dataset.
+
+    Returns:
+        Handles to the shop's file and row ids.
+    """
+    return build_shop_db(tmp_path / "shop.sqlite", today)
+
+
+@pytest.fixture
+def shop_repo(shop: ShopData) -> SqliteOrderRepository:
+    """Return a repository on the test shop database.
+
+    Args:
+        shop: The test shop.
+
+    Returns:
+        The SQLite repository.
+    """
+    return SqliteOrderRepository(shop.path)
 
 
 @pytest.fixture
