@@ -1,3 +1,5 @@
+"""Settings: policy defaults."""
+
 from orderpilot.settings import Settings
 
 

@@ -4,6 +4,7 @@ import pytest
 from langchain_anthropic import ChatAnthropic
 from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
+from pytest_mock import MockerFixture
 
 from orderpilot.errors import LLMConfigError
 from orderpilot.llm import LLMFactory
@@ -11,14 +12,14 @@ from orderpilot.settings import settings
 
 
 @pytest.fixture
-def api_keys(monkeypatch: pytest.MonkeyPatch) -> None:
+def api_keys(mocker: MockerFixture) -> None:
     """Set dummy API keys for both providers.
 
     Args:
-        monkeypatch: Pytest monkeypatch fixture.
+        mocker: Pytest-mock fixture.
     """
-    monkeypatch.setattr(settings, "OPENAI_API_KEY", SecretStr("sk-test"))
-    monkeypatch.setattr(settings, "ANTHROPIC_API_KEY", SecretStr("sk-ant-test"))
+    mocker.patch.object(settings, "OPENAI_API_KEY", SecretStr("sk-test"))
+    mocker.patch.object(settings, "ANTHROPIC_API_KEY", SecretStr("sk-ant-test"))
 
 
 @pytest.mark.usefixtures("api_keys")
@@ -43,15 +44,15 @@ def test_build_anthropic_passes_model_and_kwargs() -> None:
     ("provider", "key_name"),
     [("openai", "OPENAI_API_KEY"), ("anthropic", "ANTHROPIC_API_KEY")],
 )
-def test_missing_key_raises(monkeypatch: pytest.MonkeyPatch, provider: str, key_name: str) -> None:
+def test_missing_key_raises(mocker: MockerFixture, provider: str, key_name: str) -> None:
     """A provider without an API key fails with a message naming the variable.
 
     Args:
-        monkeypatch: Pytest monkeypatch fixture.
+        mocker: Pytest-mock fixture.
         provider: Provider under test.
         key_name: Settings field holding its key.
     """
-    monkeypatch.setattr(settings, key_name, None)
+    mocker.patch.object(settings, key_name, None)
     with pytest.raises(LLMConfigError, match=key_name):
         LLMFactory.build(provider, model_name="m")  # type: ignore[arg-type]
 

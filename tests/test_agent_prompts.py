@@ -33,7 +33,7 @@ def test_prompt_follows_settings(mocker: MockerFixture, today: datetime) -> None
 
 
 def test_prompt_requires_eligibility_tools_and_forbids_claiming_actions(today: datetime) -> None:
-    """P1-P8: eligibility questions go to the tools, and no action is claimed as done.
+    """Eligibility questions go to the tools, and no action is claimed as done.
 
     Milestone 1 can only check, so the prompt forbids saying a cancellation or return
     was carried out.

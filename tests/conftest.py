@@ -1,38 +1,73 @@
 """Shared fixtures: a stub repository, a small test shop database and the real database."""
 
+import os
 import sqlite3
 from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from pytest_mock import MockerFixture
 
 from orderpilot.domain import User
 from orderpilot.repository import SqliteOrderRepository
 from orderpilot.settings import settings
 from tests.shop_data import ShopData, build_shop_db
-from tests.stubs import STUB_USER, StubRepository
+from tests.stubs import StubRepository, verification_details
 
 
 @pytest.fixture(autouse=True)
-def _no_tracing(monkeypatch: pytest.MonkeyPatch) -> None:
+def _no_tracing(mocker: MockerFixture) -> None:
     """Keep LangSmith tracing off in every test, whatever .env says.
 
     Args:
-        monkeypatch: Pytest monkeypatch fixture.
+        mocker: Pytest-mock fixture.
     """
-    monkeypatch.setattr(settings, "LANGSMITH_TRACING", False)
-    monkeypatch.setenv("LANGSMITH_TRACING", "false")
+    mocker.patch.object(settings, "LANGSMITH_TRACING", False)
+    mocker.patch.dict(os.environ, {"LANGSMITH_TRACING": "false"})
 
 
 @pytest.fixture
-def stub_repo() -> StubRepository:
-    """Return a stub repository holding ``STUB_USER``.
+def stub_user() -> User:
+    """Return the one account the stub repository knows.
+
+    Returns:
+        Ann Lee, user 42.
+    """
+    return User(
+        user_id=42,
+        first_name="Ann",
+        last_name="Lee",
+        email="ann.lee@example.com",
+        postal_code="10115",
+    )
+
+
+@pytest.fixture
+def stub_details(stub_user: User) -> dict[str, str]:
+    """Return the correct verification details of ``stub_user``.
+
+    Args:
+        stub_user: The stub account.
+
+    Returns:
+        The four ``verify_customer`` arguments.
+    """
+    return verification_details(stub_user)
+
+
+@pytest.fixture
+def stub_repo(stub_user: User, today: datetime) -> StubRepository:
+    """Return a stub repository holding ``stub_user``.
+
+    Args:
+        stub_user: The stub account.
+        today: TODAY the stub reports.
 
     Returns:
         The stub repository.
     """
-    return StubRepository([STUB_USER])
+    return StubRepository([stub_user], today)
 
 
 @pytest.fixture

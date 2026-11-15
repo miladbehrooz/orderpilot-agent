@@ -1,6 +1,7 @@
-"""Verification service: scenarios AU1-AU6 (stub repository, plus one real-DB check)."""
+"""Verification service on a stub repository, plus one check on the real database."""
 
 from dataclasses import replace
+from datetime import datetime
 from typing import Any
 
 import pytest
@@ -9,29 +10,8 @@ from orderpilot.domain import User
 from orderpilot.repository import OrderRepository, SqliteOrderRepository
 from orderpilot.services import ReasonCode, VerificationOutcome
 from orderpilot.services.auth import verify_customer
-from tests.stubs import STUB_USER, StubRepository
-
-MAX = 3
-
-
-def _details(user: User = STUB_USER, /, **overrides: str) -> dict[str, str]:
-    """Return the four verification details of a user, with optional overrides.
-
-    Args:
-        user: User whose details to use.
-        **overrides: Details to replace, e.g. ``postal_code="00000"``.
-
-    Returns:
-        Keyword arguments for :func:`verify_customer`.
-    """
-    details = {
-        "first_name": user.first_name,
-        "last_name": user.last_name,
-        "email": user.email,
-        "postal_code": user.postal_code,
-    }
-    details.update(overrides)
-    return details
+from orderpilot.settings import settings
+from tests.stubs import StubRepository, verification_details
 
 
 def _verify(
@@ -41,7 +21,7 @@ def _verify(
     failed_attempts: int = 0,
     already_verified: bool = False,
 ) -> VerificationOutcome:
-    """Call the service with the test's max attempts.
+    """Call the service with the configured maximum number of attempts.
 
     Args:
         repo: Repository to verify against.
@@ -58,129 +38,162 @@ def _verify(
         **kwargs,
         failed_attempts=failed_attempts,
         already_verified=already_verified,
-        max_attempts=MAX,
+        max_attempts=settings.MAX_AUTH_ATTEMPTS,
     )
 
 
-def test_au1_correct_details_verify(stub_repo: StubRepository) -> None:
-    """AU1: correct details verify and return the user id outside the result.
+def test_correct_details_verify(
+    stub_repo: StubRepository, stub_user: User, stub_details: dict[str, str]
+) -> None:
+    """Correct details verify and return the user id outside the result.
 
     Args:
         stub_repo: Stub repository.
+        stub_user: The stub account.
+        stub_details: Its correct details.
     """
-    outcome = _verify(stub_repo, _details())
+    outcome = _verify(stub_repo, stub_details)
     assert outcome.result.reason_code is ReasonCode.VERIFIED
-    assert outcome.user_id == STUB_USER.user_id
+    assert outcome.user_id == stub_user.user_id
     assert not outcome.counts_as_failure
 
 
-def test_au1_matching_ignores_case_and_whitespace(stub_repo: StubRepository) -> None:
-    """AU1: details match regardless of case and surrounding or repeated spaces.
+def test_matching_ignores_case_and_whitespace(
+    stub_repo: StubRepository, stub_details: dict[str, str]
+) -> None:
+    """Details match regardless of case and surrounding or repeated spaces.
 
     Args:
         stub_repo: Stub repository.
+        stub_details: Correct details of the stub account.
     """
-    details = _details(first_name="  aNN ", last_name="LEE", email=" ANN.LEE@example.com ")
+    details = {
+        **stub_details,
+        "first_name": "  aNN ",
+        "last_name": "LEE",
+        "email": " ANN.LEE@example.com ",
+    }
     assert _verify(stub_repo, details).result.reason_code is ReasonCode.VERIFIED
 
 
 @pytest.mark.parametrize("field", ["first_name", "last_name", "postal_code"])
-def test_au2_one_wrong_field_is_generic_failure(stub_repo: StubRepository, field: str) -> None:
-    """AU2: any single wrong field gives the same NOT_MATCHED result.
+def test_one_wrong_field_is_generic_failure(
+    stub_repo: StubRepository, stub_details: dict[str, str], field: str
+) -> None:
+    """Any single wrong field gives the same NOT_MATCHED result.
 
     Args:
         stub_repo: Stub repository.
+        stub_details: Correct details of the stub account.
         field: The field given wrongly.
     """
-    outcome = _verify(stub_repo, _details(**{field: "wrong"}))
+    outcome = _verify(stub_repo, {**stub_details, field: "wrong"})
     assert outcome.result.reason_code is ReasonCode.NOT_MATCHED
-    assert outcome.result.attempts_remaining == MAX - 1
+    assert outcome.result.attempts_remaining == settings.MAX_AUTH_ATTEMPTS - 1
     assert outcome.counts_as_failure
     assert outcome.user_id is None
     assert field not in outcome.result.to_content()
 
 
-def test_au2_unknown_email_looks_like_any_mismatch(stub_repo: StubRepository) -> None:
-    """AU2: an unknown email gives exactly the same result as a wrong name.
+def test_unknown_email_looks_like_any_mismatch(
+    stub_repo: StubRepository, stub_details: dict[str, str]
+) -> None:
+    """An unknown email gives exactly the same result as a wrong name.
 
     Args:
         stub_repo: Stub repository.
+        stub_details: Correct details of the stub account.
     """
-    unknown = _verify(stub_repo, _details(email="someone@else.com"))
-    wrong_name = _verify(stub_repo, _details(first_name="Bob"))
+    unknown = _verify(stub_repo, {**stub_details, "email": "someone@else.com"})
+    wrong_name = _verify(stub_repo, {**stub_details, "first_name": "Bob"})
     assert unknown.result == wrong_name.result
 
 
-def test_au3_third_failure_locks(stub_repo: StubRepository) -> None:
-    """AU3: the failure that reaches the limit returns LOCKED.
+def test_failure_at_limit_locks(stub_repo: StubRepository, stub_details: dict[str, str]) -> None:
+    """The failure that reaches the limit returns LOCKED.
 
     Args:
         stub_repo: Stub repository.
+        stub_details: Correct details of the stub account.
     """
-    outcome = _verify(stub_repo, _details(postal_code="00000"), failed_attempts=MAX - 1)
+    outcome = _verify(
+        stub_repo,
+        {**stub_details, "postal_code": "00000"},
+        failed_attempts=settings.MAX_AUTH_ATTEMPTS - 1,
+    )
     assert outcome.result.reason_code is ReasonCode.LOCKED
     assert outcome.result.attempts_remaining == 0
     assert outcome.counts_as_failure
 
 
-def test_au3_locked_rejects_even_correct_details(stub_repo: StubRepository) -> None:
-    """AU3: once locked, correct details are refused and no attempt is counted.
+def test_locked_rejects_even_correct_details(
+    stub_repo: StubRepository, stub_details: dict[str, str]
+) -> None:
+    """Once locked, correct details are refused and no attempt is counted.
 
     Args:
         stub_repo: Stub repository.
+        stub_details: Correct details of the stub account.
     """
-    outcome = _verify(stub_repo, _details(), failed_attempts=MAX)
+    outcome = _verify(stub_repo, stub_details, failed_attempts=settings.MAX_AUTH_ATTEMPTS)
     assert outcome.result.reason_code is ReasonCode.LOCKED
     assert outcome.user_id is None
     assert not outcome.counts_as_failure
 
 
-def test_au4_right_email_wrong_postal_code_fails(stub_repo: StubRepository) -> None:
-    """AU4: a correct email with a wrong postal code fails without a hint.
+def test_right_email_wrong_postal_code_fails(
+    stub_repo: StubRepository, stub_details: dict[str, str]
+) -> None:
+    """A correct email with a wrong postal code fails without a hint.
 
     Args:
         stub_repo: Stub repository.
+        stub_details: Correct details of the stub account.
     """
-    outcome = _verify(stub_repo, _details(postal_code="99999"))
+    outcome = _verify(stub_repo, {**stub_details, "postal_code": "99999"})
     assert outcome.result.reason_code is ReasonCode.NOT_MATCHED
     assert "postal" not in outcome.result.to_content()
 
 
 @pytest.mark.parametrize("field", ["first_name", "last_name", "email", "postal_code"])
-def test_au6_missing_detail_does_not_use_attempt(stub_repo: StubRepository, field: str) -> None:
-    """AU6: a blank detail returns MISSING_DETAILS and doesn't count as a failure.
+def test_missing_detail_does_not_use_attempt(
+    stub_repo: StubRepository, stub_details: dict[str, str], field: str
+) -> None:
+    """A blank detail returns MISSING_DETAILS and doesn't count as a failure.
 
     Args:
         stub_repo: Stub repository.
+        stub_details: Correct details of the stub account.
         field: The field left blank.
     """
-    outcome = _verify(stub_repo, _details(**{field: "  "}), failed_attempts=1)
+    outcome = _verify(stub_repo, {**stub_details, field: "  "}, failed_attempts=1)
     assert outcome.result.reason_code is ReasonCode.MISSING_DETAILS
-    assert outcome.result.attempts_remaining == MAX - 1
+    assert outcome.result.attempts_remaining == settings.MAX_AUTH_ATTEMPTS - 1
     assert not outcome.counts_as_failure
 
 
-def test_already_verified_refuses_second_customer(stub_repo: StubRepository) -> None:
+def test_already_verified_refuses_second_customer(stub_user: User, today: datetime) -> None:
     """After verification, another verification is refused with ALREADY_VERIFIED.
 
     Args:
-        stub_repo: Stub repository.
+        stub_user: The stub account, verified first.
+        today: TODAY the stub reports.
     """
-    other = replace(STUB_USER, user_id=7, email="bob@example.com", first_name="Bob")
-    repo = StubRepository([STUB_USER, other])
-    outcome = _verify(repo, _details(other), already_verified=True)
+    other = replace(stub_user, user_id=7, email="bob@example.com", first_name="Bob")
+    repo = StubRepository([stub_user, other], today)
+    outcome = _verify(repo, verification_details(other), already_verified=True)
     assert outcome.result.reason_code is ReasonCode.ALREADY_VERIFIED
     assert outcome.user_id is None
     assert not outcome.counts_as_failure
 
 
-def test_au1_real_user_verifies(sqlite_repo: SqliteOrderRepository, known_user: User) -> None:
-    """AU1 against the real database.
+def test_real_user_verifies(sqlite_repo: SqliteOrderRepository, known_user: User) -> None:
+    """A real user's correct details verify against the real database.
 
     Args:
         sqlite_repo: Repository on the real database.
         known_user: A real user.
     """
-    outcome = _verify(sqlite_repo, _details(known_user))
+    outcome = _verify(sqlite_repo, verification_details(known_user))
     assert outcome.result.reason_code is ReasonCode.VERIFIED
     assert outcome.user_id == known_user.user_id

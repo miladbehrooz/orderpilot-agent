@@ -23,7 +23,7 @@ If code and docs disagree, ask before changing either.
 5. **`TODAY` comes from `meta.reference_now`** in the database. Never use `datetime.now()` in tools or evals.
 6. **Policy values in one place, `Settings` (`src/orderpilot/settings.py`):** `RETURN_WINDOW_DAYS=30`, `STUCK_DAYS=7`, `LOST_DAYS=14`, `MAX_AUTH_ATTEMPTS=3`.
 7. **Write tools re-check eligibility themselves** before writing.
-8. **Every scenario ID** (e.g. `P4`, `S1`) maps to eval test cases; keep the IDs in test names.
+8. **Every scenario ID** (e.g. `P4`, `S1`) maps to eval cases in `evals/`, and the IDs live there only. Unit tests in `tests/` are named after the rule or behaviour they check (e.g. `test_return_window_boundary`), never after a scenario ID.
 9. **Tool-call errors are returned as structured results**, not raised to the LLM as stack traces.
 
 ## Milestones
