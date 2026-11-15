@@ -9,7 +9,7 @@ chat, ``langgraph dev``, evals) then traces the same way.
 import os
 from collections.abc import MutableMapping
 
-from orderpilot.logging import logger
+from orderpilot.observability.logger import logger
 from orderpilot.settings import Settings, settings
 
 

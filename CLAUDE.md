@@ -51,8 +51,9 @@ orderpilot-agent/
 │   ├── server.py         # `graph` for `langgraph dev` (langgraph.json)
 │   ├── llm.py            # LLMFactory (provider registry: openai, anthropic)
 │   ├── domain.py         # plain dataclasses (User, later Order, OrderItem)
-│   ├── db.py             # SQLite connection, timestamp parsing
-│   ├── repository/       # OrderRepository Protocol + SqliteOrderRepository
+│   ├── errors.py         # OrderPilotError and its subclasses
+│   ├── observability/    # logger.py (Loguru `logger`), tracing.py (LangSmith setup)
+│   ├── repository/       # OrderRepository Protocol, SqliteOrderRepository, db.py (SQLite helpers)
 │   ├── services/         # framework-free business functions + result models
 │   ├── tools/            # thin LangChain @tool wrappers around services
 │   ├── agent/            # graph, state, prompts (knows only model + tools)

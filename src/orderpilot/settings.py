@@ -34,8 +34,8 @@ class Settings(BaseSettings):
             reject the parameter.
         AGENT_RECURSION_LIMIT: Maximum graph steps per agent run, so a looping model stops.
         LANGSMITH_TRACING: Send traces of agent runs to LangSmith. Applied to the process
-            environment by :func:`orderpilot.tracing.configure_tracing`, because LangChain
-            reads these values from the environment, not from this class.
+            environment by :func:`orderpilot.observability.tracing.configure_tracing`,
+            because LangChain reads these values from the environment, not from this class.
         LANGSMITH_API_KEY: LangSmith API key, required when tracing is on.
         LANGSMITH_PROJECT: LangSmith project that receives the traces.
         LANGSMITH_ENDPOINT: LangSmith API URL; set only for a non-default region (e.g. EU).

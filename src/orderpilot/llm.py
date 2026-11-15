@@ -18,7 +18,7 @@ from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
 
 from orderpilot.errors import LLMConfigError
-from orderpilot.logging import logger
+from orderpilot.observability.logger import logger
 from orderpilot.settings import ProviderName, settings
 
 BuilderFunc: TypeAlias = Callable[..., BaseChatModel]

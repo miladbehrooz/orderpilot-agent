@@ -2,8 +2,8 @@
 
 from pydantic import SecretStr
 
+from orderpilot.observability.tracing import configure_tracing
 from orderpilot.settings import Settings
-from orderpilot.tracing import configure_tracing
 
 
 def _settings(**overrides: object) -> Settings:

@@ -25,7 +25,7 @@ from langgraph.types import Checkpointer, RetryPolicy
 
 from orderpilot.agent.prompts import LOCKED_REPLY
 from orderpilot.agent.state import AgentState, is_locked, is_verified
-from orderpilot.logging import logger
+from orderpilot.observability.logger import logger
 from orderpilot.services.results import ReasonCode, ToolResult
 from orderpilot.settings import settings
 from orderpilot.tools import VERIFY_TOOL_NAME
