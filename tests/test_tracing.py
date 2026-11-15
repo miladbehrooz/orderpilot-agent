@@ -2,7 +2,7 @@
 
 from pydantic import SecretStr
 
-from orderpilot.observability.tracing import configure_tracing
+from orderpilot.observability import configure_tracing
 from orderpilot.settings import Settings
 
 

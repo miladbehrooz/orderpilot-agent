@@ -12,7 +12,7 @@ from orderpilot.agent.graph import AgentGraph, build_graph
 from orderpilot.agent.prompts import render_system_prompt
 from orderpilot.errors import LLMConfigError
 from orderpilot.llm import LLMFactory
-from orderpilot.observability.tracing import configure_tracing
+from orderpilot.observability import configure_tracing
 from orderpilot.repository import OrderRepository, SqliteOrderRepository
 from orderpilot.settings import settings
 from orderpilot.tools import build_tools

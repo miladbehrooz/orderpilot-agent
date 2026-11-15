@@ -1,6 +1,6 @@
 """Project-wide Loguru logger.
 
-Import the configured logger with ``from orderpilot.observability.logger import logger``.
+Import the configured logger with ``from orderpilot.observability import logger``.
 """
 
 from __future__ import annotations

@@ -52,7 +52,7 @@ orderpilot-agent/
 │   ├── llm.py            # LLMFactory (provider registry: openai, anthropic)
 │   ├── domain.py         # plain dataclasses (User, later Order, OrderItem)
 │   ├── errors.py         # OrderPilotError and its subclasses
-│   ├── observability/    # logger.py (Loguru `logger`), tracing.py (LangSmith setup)
+│   ├── observability/    # log.py (Loguru `logger`), tracing.py (LangSmith setup)
 │   ├── repository/       # OrderRepository Protocol, SqliteOrderRepository, db.py (SQLite helpers)
 │   ├── services/         # framework-free business functions + result models
 │   ├── tools/            # thin LangChain @tool wrappers around services

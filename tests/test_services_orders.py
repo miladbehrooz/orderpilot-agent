@@ -5,8 +5,8 @@ from datetime import date, timedelta
 
 from orderpilot.domain import OrderStatus
 from orderpilot.repository import SqliteOrderRepository
+from orderpilot.services import ReasonCode
 from orderpilot.services import orders as service
-from orderpilot.services.results import ReasonCode
 from tests.shop_data import ShopData
 
 
