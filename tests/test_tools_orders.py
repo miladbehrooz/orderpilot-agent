@@ -37,10 +37,10 @@ def test_lookup_tools_are_registered(lookup_tools: list[BaseTool]) -> None:
     ("name", "args"),
     [("list_my_orders", {}), ("get_order_details", {"order_id": 101})],
 )
-def test_au5_lookup_tools_refuse_without_verification(
+def test_lookup_tools_refuse_without_verification(
     shop_repo: SqliteOrderRepository, name: str, args: dict[str, Any]
 ) -> None:
-    """AU5 / rule 3: called before verification, a tool refuses and shows no data.
+    """Rule 3: called before verification, a tool refuses and shows no data.
 
     Args:
         shop_repo: Repository on the test shop.
@@ -50,8 +50,8 @@ def test_au5_lookup_tools_refuse_without_verification(
     assert run_tool_call(shop_repo, name, args) == {"reason_code": "NOT_VERIFIED"}
 
 
-def test_s1_tool_schemas_have_no_user_id(lookup_tools: list[BaseTool]) -> None:
-    """S1 / rule 2: the model cannot pass a user id; ``runtime`` stays hidden too.
+def test_tool_schemas_have_no_user_id(lookup_tools: list[BaseTool]) -> None:
+    """Rule 2: the model cannot pass a user id; ``runtime`` stays hidden too.
 
     Args:
         lookup_tools: The customer tools.
@@ -63,8 +63,8 @@ def test_s1_tool_schemas_have_no_user_id(lookup_tools: list[BaseTool]) -> None:
         assert "runtime" not in properties
 
 
-def test_s1_user_id_comes_from_state(shop_repo: SqliteOrderRepository, shop: ShopData) -> None:
-    """S1: the same call sees an order only when the state's user owns it.
+def test_user_id_comes_from_state(shop_repo: SqliteOrderRepository, shop: ShopData) -> None:
+    """The same call sees an order only when the state's user owns it.
 
     Args:
         shop_repo: Repository on the test shop.

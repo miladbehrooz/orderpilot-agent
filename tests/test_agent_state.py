@@ -48,8 +48,8 @@ def test_is_verified(fields: dict[str, object], expected: bool) -> None:
         pytest.param(settings.MAX_AUTH_ATTEMPTS + 1, True, id="above-limit"),
     ],
 )
-def test_au3_is_locked_at_max_attempts(failed: int, expected: bool) -> None:
-    """AU3: verification locks once failures reach MAX_AUTH_ATTEMPTS.
+def test_is_locked_at_max_attempts(failed: int, expected: bool) -> None:
+    """Verification locks once failures reach MAX_AUTH_ATTEMPTS.
 
     Args:
         failed: Failed attempts in state.

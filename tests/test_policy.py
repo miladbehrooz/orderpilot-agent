@@ -136,8 +136,8 @@ def test_days_in_status(
         pytest.param(settings.STUCK_DAYS + 1, True, id="over-limit-stuck"),
     ],
 )
-def test_q1_stuck_boundary(today: datetime, days: int, expected: bool) -> None:
-    """Q1: an order is stuck only after more than STUCK_DAYS days in Processing.
+def test_stuck_boundary(today: datetime, days: int, expected: bool) -> None:
+    """An order is stuck only after more than STUCK_DAYS days in Processing.
 
     Args:
         today: Reference time.
@@ -151,8 +151,8 @@ def test_q1_stuck_boundary(today: datetime, days: int, expected: bool) -> None:
 @pytest.mark.parametrize(
     "status", [s for s in OrderStatus if s is not OrderStatus.PROCESSING], ids=str
 )
-def test_q1_only_processing_orders_can_be_stuck(today: datetime, status: OrderStatus) -> None:
-    """Q1: an old order in any other status is never stuck.
+def test_only_processing_orders_can_be_stuck(today: datetime, status: OrderStatus) -> None:
+    """An old order in any other status is never stuck.
 
     Args:
         today: Reference time.
@@ -163,8 +163,8 @@ def test_q1_only_processing_orders_can_be_stuck(today: datetime, status: OrderSt
     assert policy.is_stuck(order, today) is False
 
 
-def test_q1_stuck_threshold_comes_from_settings(mocker: MockerFixture, today: datetime) -> None:
-    """Q1: the stuck threshold is read from settings, not hard-coded.
+def test_stuck_threshold_comes_from_settings(mocker: MockerFixture, today: datetime) -> None:
+    """The stuck threshold is read from settings, not hard-coded.
 
     Args:
         mocker: Pytest-mock fixture.
@@ -182,8 +182,8 @@ def test_q1_stuck_threshold_comes_from_settings(mocker: MockerFixture, today: da
         pytest.param(settings.LOST_DAYS + 1, True, id="over-limit-lost"),
     ],
 )
-def test_q2_lost_boundary(today: datetime, days: int, expected: bool) -> None:
-    """Q2: a shipped order is possibly lost only after more than LOST_DAYS days.
+def test_lost_boundary(today: datetime, days: int, expected: bool) -> None:
+    """A shipped order is possibly lost only after more than LOST_DAYS days.
 
     Args:
         today: Reference time.
@@ -196,8 +196,8 @@ def test_q2_lost_boundary(today: datetime, days: int, expected: bool) -> None:
     assert policy.is_possibly_lost(order, today) is expected
 
 
-def test_q2_delivered_order_is_never_lost(today: datetime) -> None:
-    """Q2: an order that was delivered is not lost, however long ago it shipped.
+def test_delivered_order_is_never_lost(today: datetime) -> None:
+    """An order that was delivered is not lost, however long ago it shipped.
 
     Args:
         today: Reference time.
@@ -242,17 +242,17 @@ def _item(
 @pytest.mark.parametrize(
     ("status", "eligible", "code"),
     [
-        pytest.param(OrderStatus.PROCESSING, True, ReasonCode.ELIGIBLE, id="p1-processing"),
-        pytest.param(OrderStatus.SHIPPED, False, ReasonCode.ALREADY_SHIPPED, id="p2-shipped"),
+        pytest.param(OrderStatus.PROCESSING, True, ReasonCode.ELIGIBLE, id="processing"),
+        pytest.param(OrderStatus.SHIPPED, False, ReasonCode.ALREADY_SHIPPED, id="shipped"),
         pytest.param(OrderStatus.COMPLETE, False, ReasonCode.ALREADY_SHIPPED, id="complete"),
         pytest.param(OrderStatus.RETURNED, False, ReasonCode.ALREADY_RETURNED, id="returned"),
         pytest.param(OrderStatus.CANCELLED, False, ReasonCode.ORDER_CANCELLED, id="cancelled"),
     ],
 )
-def test_p1_p2_cancel_decision_by_status(
+def test_cancel_decision_by_status(
     today: datetime, status: OrderStatus, eligible: bool, code: ReasonCode
 ) -> None:
-    """P1, P2: only a Processing order can be cancelled; every status has its own code.
+    """Only a Processing order can be cancelled; every status has its own code.
 
     Args:
         today: Reference time.
@@ -264,8 +264,8 @@ def test_p1_p2_cancel_decision_by_status(
     assert (decision.eligible, decision.reason_code) == (eligible, code)
 
 
-def test_p1_stuck_processing_order_can_still_be_cancelled(today: datetime) -> None:
-    """P1: how long an order has been Processing doesn't matter for cancelling.
+def test_stuck_processing_order_can_still_be_cancelled(today: datetime) -> None:
+    """How long an order has been Processing doesn't matter for cancelling.
 
     Args:
         today: Reference time.
@@ -282,8 +282,8 @@ def test_p1_stuck_processing_order_can_still_be_cancelled(today: datetime) -> No
         pytest.param(settings.RETURN_WINDOW_DAYS + 1, ReasonCode.WINDOW_EXPIRED, id="day-after"),
     ],
 )
-def test_p3_p4_return_window_boundary(today: datetime, days: int, code: ReasonCode) -> None:
-    """P3, P4: day 30 after delivery is still in the window, day 31 is not.
+def test_return_window_boundary(today: datetime, days: int, code: ReasonCode) -> None:
+    """Day 30 after delivery is still in the window, day 31 is not.
 
     Args:
         today: Reference time.
@@ -295,8 +295,8 @@ def test_p3_p4_return_window_boundary(today: datetime, days: int, code: ReasonCo
     assert decision.days_since_delivery == days
 
 
-def test_p3_eligible_return_has_refund_and_deadline(today: datetime) -> None:
-    """P3: an eligible item reports its sale price as refund and the last return day.
+def test_eligible_return_has_refund_and_deadline(today: datetime) -> None:
+    """An eligible item reports its sale price as refund and the last return day.
 
     Args:
         today: Reference time.
@@ -309,8 +309,8 @@ def test_p3_eligible_return_has_refund_and_deadline(today: datetime) -> None:
     assert decision.return_deadline == delivered.date() + timedelta(days=30)
 
 
-def test_p4_expired_return_keeps_delivery_facts(today: datetime) -> None:
-    """P4: an expired item has no refund but still reports delivery date and deadline.
+def test_expired_return_keeps_delivery_facts(today: datetime) -> None:
+    """An expired item has no refund but still reports delivery date and deadline.
 
     Args:
         today: Reference time.
@@ -325,15 +325,15 @@ def test_p4_expired_return_keeps_delivery_facts(today: datetime) -> None:
 @pytest.mark.parametrize(
     ("status", "code"),
     [
-        pytest.param(OrderStatus.PROCESSING, ReasonCode.NOT_DELIVERED, id="p5-processing"),
-        pytest.param(OrderStatus.SHIPPED, ReasonCode.NOT_DELIVERED, id="p5-shipped"),
-        pytest.param(OrderStatus.CANCELLED, ReasonCode.ORDER_CANCELLED, id="p6-cancelled"),
+        pytest.param(OrderStatus.PROCESSING, ReasonCode.NOT_DELIVERED, id="processing"),
+        pytest.param(OrderStatus.SHIPPED, ReasonCode.NOT_DELIVERED, id="shipped"),
+        pytest.param(OrderStatus.CANCELLED, ReasonCode.ORDER_CANCELLED, id="cancelled"),
     ],
 )
-def test_p5_p6_undelivered_items_cannot_be_returned(
+def test_undelivered_items_cannot_be_returned(
     today: datetime, status: OrderStatus, code: ReasonCode
 ) -> None:
-    """P5, P6: an item that was never delivered can't be returned.
+    """An item that was never delivered can't be returned.
 
     Args:
         today: Reference time.
@@ -345,8 +345,8 @@ def test_p5_p6_undelivered_items_cannot_be_returned(
     assert decision.delivered_on is None
 
 
-def test_p5_complete_without_delivery_date_is_not_delivered(today: datetime) -> None:
-    """P5: a Complete item with no delivery date is treated as not delivered.
+def test_complete_without_delivery_date_is_not_delivered(today: datetime) -> None:
+    """A Complete item with no delivery date is treated as not delivered.
 
     Args:
         today: Reference time.
@@ -358,12 +358,12 @@ def test_p5_complete_without_delivery_date_is_not_delivered(today: datetime) -> 
 @pytest.mark.parametrize(
     ("status", "return_requested"),
     [
-        pytest.param(OrderStatus.RETURNED, False, id="p7-returned-status"),
-        pytest.param(OrderStatus.COMPLETE, True, id="w5-return-request-row"),
+        pytest.param(OrderStatus.RETURNED, False, id="returned-status"),
+        pytest.param(OrderStatus.COMPLETE, True, id="return-request-row"),
     ],
 )
-def test_p7_already_returned(today: datetime, status: OrderStatus, return_requested: bool) -> None:
-    """P7 (and W5 later): a Returned item, or one with a return request, is already returned.
+def test_already_returned(today: datetime, status: OrderStatus, return_requested: bool) -> None:
+    """A Returned item, or one with a return request, is already returned.
 
     Args:
         today: Reference time.

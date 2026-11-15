@@ -19,17 +19,17 @@ class ShopOrders:
     """Order ids in the test shop, named by the data condition they cover.
 
     Attributes:
-        shipped: Customer's order shipped 2 days ago (L1).
+        shipped: Customer's order shipped 2 days ago.
         processing: Customer's order placed 2 days ago, not stuck.
-        stuck: Customer's order Processing for 400 days (Q1).
-        lost: Customer's order shipped 60 days ago, never delivered (Q2).
+        stuck: Customer's order Processing for 400 days, so stuck.
+        lost: Customer's order shipped 60 days ago, never delivered, so possibly lost.
         complete: Customer's order placed last month and delivered, with two items, one
-            of them a product without name or brand (L3, L4, Q3).
-        returned: Customer's order with both items returned (L5).
+            of them a product without name or brand.
+        returned: Customer's order with both items returned.
         cancelled: Customer's cancelled order.
-        delivered_recently: Customer's order delivered 5 days ago (P3).
-        delivered_long_ago: Customer's order delivered 45 days ago (P4).
-        other_users: An order of a different customer (S1).
+        delivered_recently: Customer's order delivered 5 days ago, inside the return window.
+        delivered_long_ago: Customer's order delivered 45 days ago, outside the return window.
+        other_users: An order of a different customer.
     """
 
     shipped: int
@@ -52,10 +52,10 @@ class ShopData:
         path: The SQLite file.
         today: Its ``meta.reference_now``.
         customer_id: The customer with one order of every kind.
-        no_orders_id: A customer without orders (L6).
+        no_orders_id: A customer without orders.
         other_id: Another customer, owner of ``orders.other_users``.
         orders: The order ids.
-        unnamed_item_id: The item whose product has no name or brand (Q3).
+        unnamed_item_id: The item whose product has no name or brand.
     """
 
     path: Path

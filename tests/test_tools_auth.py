@@ -61,8 +61,8 @@ def _contents(result: dict[str, Any]) -> list[dict[str, Any]]:
     return [json.loads(m.text) for m in result["messages"] if isinstance(m, ToolMessage)]
 
 
-def test_au1_success_sets_user_id_but_hides_it(stub_repo: StubRepository) -> None:
-    """AU1: success writes user_id to state, and the model never sees it (rule 2).
+def test_success_sets_user_id_but_hides_it(stub_repo: StubRepository) -> None:
+    """Success writes user_id to state, and the model never sees it (rule 2).
 
     Args:
         stub_repo: Stub repository.
@@ -73,8 +73,8 @@ def test_au1_success_sets_user_id_but_hides_it(stub_repo: StubRepository) -> Non
     assert _contents(result) == [{"reason_code": "VERIFIED"}]
 
 
-def test_au2_failure_counts_attempt(stub_repo: StubRepository) -> None:
-    """AU2: a mismatch increments the counter and reports attempts left.
+def test_failure_counts_attempt(stub_repo: StubRepository) -> None:
+    """A mismatch increments the counter and reports attempts left.
 
     Args:
         stub_repo: Stub repository.
@@ -87,8 +87,8 @@ def test_au2_failure_counts_attempt(stub_repo: StubRepository) -> None:
     ]
 
 
-def test_au3_parallel_failures_are_all_counted(stub_repo: StubRepository) -> None:
-    """AU3: two failed calls in one step both count, thanks to the summing reducer.
+def test_parallel_failures_are_all_counted(stub_repo: StubRepository) -> None:
+    """Two failed calls in one step both count, thanks to the summing reducer.
 
     Args:
         stub_repo: Stub repository.

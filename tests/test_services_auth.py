@@ -1,4 +1,4 @@
-"""Verification service: scenarios AU1-AU6 (stub repository, plus one real-DB check)."""
+"""Verification service on a stub repository, plus one check on the real database."""
 
 from dataclasses import replace
 from typing import Any
@@ -62,8 +62,8 @@ def _verify(
     )
 
 
-def test_au1_correct_details_verify(stub_repo: StubRepository) -> None:
-    """AU1: correct details verify and return the user id outside the result.
+def test_correct_details_verify(stub_repo: StubRepository) -> None:
+    """Correct details verify and return the user id outside the result.
 
     Args:
         stub_repo: Stub repository.
@@ -74,8 +74,8 @@ def test_au1_correct_details_verify(stub_repo: StubRepository) -> None:
     assert not outcome.counts_as_failure
 
 
-def test_au1_matching_ignores_case_and_whitespace(stub_repo: StubRepository) -> None:
-    """AU1: details match regardless of case and surrounding or repeated spaces.
+def test_matching_ignores_case_and_whitespace(stub_repo: StubRepository) -> None:
+    """Details match regardless of case and surrounding or repeated spaces.
 
     Args:
         stub_repo: Stub repository.
@@ -85,8 +85,8 @@ def test_au1_matching_ignores_case_and_whitespace(stub_repo: StubRepository) -> 
 
 
 @pytest.mark.parametrize("field", ["first_name", "last_name", "postal_code"])
-def test_au2_one_wrong_field_is_generic_failure(stub_repo: StubRepository, field: str) -> None:
-    """AU2: any single wrong field gives the same NOT_MATCHED result.
+def test_one_wrong_field_is_generic_failure(stub_repo: StubRepository, field: str) -> None:
+    """Any single wrong field gives the same NOT_MATCHED result.
 
     Args:
         stub_repo: Stub repository.
@@ -100,8 +100,8 @@ def test_au2_one_wrong_field_is_generic_failure(stub_repo: StubRepository, field
     assert field not in outcome.result.to_content()
 
 
-def test_au2_unknown_email_looks_like_any_mismatch(stub_repo: StubRepository) -> None:
-    """AU2: an unknown email gives exactly the same result as a wrong name.
+def test_unknown_email_looks_like_any_mismatch(stub_repo: StubRepository) -> None:
+    """An unknown email gives exactly the same result as a wrong name.
 
     Args:
         stub_repo: Stub repository.
@@ -111,8 +111,8 @@ def test_au2_unknown_email_looks_like_any_mismatch(stub_repo: StubRepository) ->
     assert unknown.result == wrong_name.result
 
 
-def test_au3_third_failure_locks(stub_repo: StubRepository) -> None:
-    """AU3: the failure that reaches the limit returns LOCKED.
+def test_third_failure_locks(stub_repo: StubRepository) -> None:
+    """The failure that reaches the limit returns LOCKED.
 
     Args:
         stub_repo: Stub repository.
@@ -123,8 +123,8 @@ def test_au3_third_failure_locks(stub_repo: StubRepository) -> None:
     assert outcome.counts_as_failure
 
 
-def test_au3_locked_rejects_even_correct_details(stub_repo: StubRepository) -> None:
-    """AU3: once locked, correct details are refused and no attempt is counted.
+def test_locked_rejects_even_correct_details(stub_repo: StubRepository) -> None:
+    """Once locked, correct details are refused and no attempt is counted.
 
     Args:
         stub_repo: Stub repository.
@@ -135,8 +135,8 @@ def test_au3_locked_rejects_even_correct_details(stub_repo: StubRepository) -> N
     assert not outcome.counts_as_failure
 
 
-def test_au4_right_email_wrong_postal_code_fails(stub_repo: StubRepository) -> None:
-    """AU4: a correct email with a wrong postal code fails without a hint.
+def test_right_email_wrong_postal_code_fails(stub_repo: StubRepository) -> None:
+    """A correct email with a wrong postal code fails without a hint.
 
     Args:
         stub_repo: Stub repository.
@@ -147,8 +147,8 @@ def test_au4_right_email_wrong_postal_code_fails(stub_repo: StubRepository) -> N
 
 
 @pytest.mark.parametrize("field", ["first_name", "last_name", "email", "postal_code"])
-def test_au6_missing_detail_does_not_use_attempt(stub_repo: StubRepository, field: str) -> None:
-    """AU6: a blank detail returns MISSING_DETAILS and doesn't count as a failure.
+def test_missing_detail_does_not_use_attempt(stub_repo: StubRepository, field: str) -> None:
+    """A blank detail returns MISSING_DETAILS and doesn't count as a failure.
 
     Args:
         stub_repo: Stub repository.
@@ -174,8 +174,8 @@ def test_already_verified_refuses_second_customer(stub_repo: StubRepository) -> 
     assert not outcome.counts_as_failure
 
 
-def test_au1_real_user_verifies(sqlite_repo: SqliteOrderRepository, known_user: User) -> None:
-    """AU1 against the real database.
+def test_real_user_verifies(sqlite_repo: SqliteOrderRepository, known_user: User) -> None:
+    """A real user's correct details verify against the real database.
 
     Args:
         sqlite_repo: Repository on the real database.

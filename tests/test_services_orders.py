@@ -10,8 +10,8 @@ from orderpilot.services import orders as service
 from tests.shop_data import ShopData
 
 
-def test_l1_shipped_order_has_ship_date(shop_repo: SqliteOrderRepository, shop: ShopData) -> None:
-    """L1: a shipped order reports its status and ship date.
+def test_shipped_order_has_ship_date(shop_repo: SqliteOrderRepository, shop: ShopData) -> None:
+    """A shipped order reports its status and ship date.
 
     Args:
         shop_repo: Repository on the test shop.
@@ -26,8 +26,8 @@ def test_l1_shipped_order_has_ship_date(shop_repo: SqliteOrderRepository, shop: 
     assert (newest.days_in_status, newest.is_possibly_lost) == (2, False)
 
 
-def test_l2_lists_all_open_orders(shop_repo: SqliteOrderRepository, shop: ShopData) -> None:
-    """L2: with several open orders, all of them are returned so the agent can ask.
+def test_lists_all_open_orders(shop_repo: SqliteOrderRepository, shop: ShopData) -> None:
+    """With several open orders, all of them are returned so the agent can ask.
 
     Args:
         shop_repo: Repository on the test shop.
@@ -45,10 +45,10 @@ def test_l2_lists_all_open_orders(shop_repo: SqliteOrderRepository, shop: ShopDa
     assert result.has_more is False
 
 
-def test_l3_details_include_items_prices_status(
+def test_details_include_items_prices_status(
     shop_repo: SqliteOrderRepository, shop: ShopData
 ) -> None:
-    """L3: order details list every item with price and status, plus the order total.
+    """Order details list every item with price and status, plus the order total.
 
     Args:
         shop_repo: Repository on the test shop.
@@ -66,8 +66,8 @@ def test_l3_details_include_items_prices_status(
     assert result.order.refund_total is None
 
 
-def test_l4_date_range_filters_last_month(shop_repo: SqliteOrderRepository, shop: ShopData) -> None:
-    """L4: "last month" (October 2026, given TODAY 2026-11-12) finds that month's orders.
+def test_date_range_filters_last_month(shop_repo: SqliteOrderRepository, shop: ShopData) -> None:
+    """Last month's range (October 2026, given TODAY 2026-11-12) finds that month's orders.
 
     Args:
         shop_repo: Repository on the test shop.
@@ -80,10 +80,10 @@ def test_l4_date_range_filters_last_month(shop_repo: SqliteOrderRepository, shop
     assert [o.order_id for o in result.orders] == [shop.orders.returned, shop.orders.complete]
 
 
-def test_l5_returned_order_has_return_date_and_refund_total(
+def test_returned_order_has_return_date_and_refund_total(
     shop_repo: SqliteOrderRepository, shop: ShopData
 ) -> None:
-    """L5: a returned order shows when it was returned and the refunded amount.
+    """A returned order shows when it was returned and the refunded amount.
 
     Args:
         shop_repo: Repository on the test shop.
@@ -95,10 +95,10 @@ def test_l5_returned_order_has_return_date_and_refund_total(
     assert result.order.refund_total == 50.0
 
 
-def test_l6_user_without_orders_gets_empty_list(
+def test_user_without_orders_gets_empty_list(
     shop_repo: SqliteOrderRepository, shop: ShopData
 ) -> None:
-    """L6: a customer without orders gets OK with an explicit empty list, nothing invented.
+    """A customer without orders gets OK with an explicit empty list, nothing invented.
 
     Args:
         shop_repo: Repository on the test shop.
@@ -112,8 +112,8 @@ def test_l6_user_without_orders_gets_empty_list(
     }
 
 
-def test_q1_old_processing_order_is_stuck(shop_repo: SqliteOrderRepository, shop: ShopData) -> None:
-    """Q1: an order Processing for 400 days is flagged stuck; a 2-day-old one is not.
+def test_old_processing_order_is_stuck(shop_repo: SqliteOrderRepository, shop: ShopData) -> None:
+    """An order Processing for 400 days is flagged stuck; a 2-day-old one is not.
 
     Args:
         shop_repo: Repository on the test shop.
@@ -125,10 +125,10 @@ def test_q1_old_processing_order_is_stuck(shop_repo: SqliteOrderRepository, shop
     assert flags == {shop.orders.stuck: (True, 400), shop.orders.processing: (False, 2)}
 
 
-def test_q2_long_shipped_order_is_possibly_lost(
+def test_long_shipped_order_is_possibly_lost(
     shop_repo: SqliteOrderRepository, shop: ShopData
 ) -> None:
-    """Q2: an order shipped 60 days ago without delivery is flagged possibly lost.
+    """An order shipped 60 days ago without delivery is flagged possibly lost.
 
     Args:
         shop_repo: Repository on the test shop.
@@ -139,10 +139,10 @@ def test_q2_long_shipped_order_is_possibly_lost(
     assert (result.order.is_possibly_lost, result.order.days_in_status) == (True, 60)
 
 
-def test_q3_unnamed_product_serialises_null_name(
+def test_unnamed_product_serialises_null_name(
     shop_repo: SqliteOrderRepository, shop: ShopData
 ) -> None:
-    """Q3: a missing name/brand reaches the model as explicit null, with the category.
+    """A missing name/brand reaches the model as explicit null, with the category.
 
     Args:
         shop_repo: Repository on the test shop.
@@ -156,8 +156,8 @@ def test_q3_unnamed_product_serialises_null_name(
     assert unnamed["category"] == "Jeans"
 
 
-def test_am2_unknown_order_is_not_found(shop_repo: SqliteOrderRepository, shop: ShopData) -> None:
-    """AM2: an order id that doesn't exist gives NOT_FOUND and no order data.
+def test_unknown_order_is_not_found(shop_repo: SqliteOrderRepository, shop: ShopData) -> None:
+    """An order id that doesn't exist gives NOT_FOUND and no order data.
 
     Args:
         shop_repo: Repository on the test shop.
@@ -167,10 +167,8 @@ def test_am2_unknown_order_is_not_found(shop_repo: SqliteOrderRepository, shop: 
     assert json.loads(result.to_content()) == {"reason_code": "NOT_FOUND"}
 
 
-def test_s1_other_users_order_is_not_found(
-    shop_repo: SqliteOrderRepository, shop: ShopData
-) -> None:
-    """S1 / rule 4: another customer's order gives exactly the same answer as a missing one.
+def test_other_users_order_is_not_found(shop_repo: SqliteOrderRepository, shop: ShopData) -> None:
+    """Rule 4: another customer's order gives exactly the same answer as a missing one.
 
     Args:
         shop_repo: Repository on the test shop.
@@ -214,7 +212,7 @@ def test_reversed_date_range_is_invalid(shop_repo: SqliteOrderRepository, shop: 
 
 
 def test_output_hides_internal_ids(shop_repo: SqliteOrderRepository, shop: ShopData) -> None:
-    """S2: tool output never contains user, product or inventory ids.
+    """Tool output never contains user, product or inventory ids.
 
     Args:
         shop_repo: Repository on the test shop.

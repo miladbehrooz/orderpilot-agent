@@ -150,10 +150,10 @@ def test_list_orders_respects_limit(shop_repo: SqliteOrderRepository, shop: Shop
     ]
 
 
-def test_l6_list_orders_of_user_without_orders_is_empty(
+def test_list_orders_of_user_without_orders_is_empty(
     shop_repo: SqliteOrderRepository, shop: ShopData
 ) -> None:
-    """L6: a customer without orders gets an empty list.
+    """A customer without orders gets an empty list.
 
     Args:
         shop_repo: Repository on the test shop.
@@ -177,10 +177,10 @@ def test_get_order_loads_its_items(shop_repo: SqliteOrderRepository, shop: ShopD
     assert order.delivered_at is not None and order.delivered_at.tzinfo is UTC
 
 
-def test_q3_missing_product_name_and_brand_are_none(
+def test_missing_product_name_and_brand_are_none(
     shop_repo: SqliteOrderRepository, shop: ShopData
 ) -> None:
-    """Q3: a product without name or brand comes back as None, with its category.
+    """A product without name or brand comes back as None, with its category.
 
     Args:
         shop_repo: Repository on the test shop.
@@ -192,10 +192,10 @@ def test_q3_missing_product_name_and_brand_are_none(
     assert (unnamed.product_name, unnamed.brand, unnamed.category) == (None, None, "Jeans")
 
 
-def test_s1_get_order_of_another_user_returns_none(
+def test_get_order_of_another_user_returns_none(
     shop_repo: SqliteOrderRepository, shop: ShopData
 ) -> None:
-    """S1 / rule 4: another customer's order is invisible, exactly like a missing one.
+    """Rule 4: another customer's order is invisible, exactly like a missing one.
 
     Args:
         shop_repo: Repository on the test shop.
@@ -205,10 +205,8 @@ def test_s1_get_order_of_another_user_returns_none(
     assert shop_repo.get_order(shop.other_id, shop.orders.other_users) is not None
 
 
-def test_am2_get_unknown_order_returns_none(
-    shop_repo: SqliteOrderRepository, shop: ShopData
-) -> None:
-    """AM2: an order id that doesn't exist returns None.
+def test_get_unknown_order_returns_none(shop_repo: SqliteOrderRepository, shop: ShopData) -> None:
+    """An order id that doesn't exist returns None.
 
     Args:
         shop_repo: Repository on the test shop.

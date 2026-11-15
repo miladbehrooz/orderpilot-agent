@@ -1,4 +1,4 @@
-"""Eligibility services on the test shop database, one test per scenario (P1-P8)."""
+"""Cancellation and return eligibility services on the test shop database."""
 
 import json
 import sqlite3
@@ -17,10 +17,10 @@ from tests.shop_data import ShopData
 Check = Callable[[SqliteOrderRepository, int, int], ToolResult]
 
 
-def test_p1_processing_order_can_be_cancelled(
+def test_processing_order_can_be_cancelled(
     shop_repo: SqliteOrderRepository, shop: ShopData
 ) -> None:
-    """P1: a Processing order can be cancelled.
+    """A Processing order can be cancelled.
 
     Args:
         shop_repo: Repository on the test shop.
@@ -33,10 +33,10 @@ def test_p1_processing_order_can_be_cancelled(
     assert result.status is OrderStatus.PROCESSING
 
 
-def test_p2_shipped_order_cannot_be_cancelled(
+def test_shipped_order_cannot_be_cancelled(
     shop_repo: SqliteOrderRepository, shop: ShopData
 ) -> None:
-    """P2: a Shipped order can't be cancelled, and the result carries its ship date.
+    """A Shipped order can't be cancelled, and the result carries its ship date.
 
     Args:
         shop_repo: Repository on the test shop.
@@ -49,10 +49,10 @@ def test_p2_shipped_order_cannot_be_cancelled(
     assert result.shipped_on == (shop.today - timedelta(days=2)).date()
 
 
-def test_p3_recent_delivery_is_returnable_with_refund(
+def test_recent_delivery_is_returnable_with_refund(
     shop_repo: SqliteOrderRepository, shop: ShopData
 ) -> None:
-    """P3: delivered 5 days ago, so the item can be returned for its sale price.
+    """Delivered 5 days ago, so the item can be returned for its sale price.
 
     Args:
         shop_repo: Repository on the test shop.
@@ -73,10 +73,8 @@ def test_p3_recent_delivery_is_returnable_with_refund(
     assert item.return_deadline == delivered + timedelta(days=30)
 
 
-def test_p4_old_delivery_is_outside_window(
-    shop_repo: SqliteOrderRepository, shop: ShopData
-) -> None:
-    """P4: delivered 45 days ago, so the 30-day window has passed.
+def test_old_delivery_is_outside_window(shop_repo: SqliteOrderRepository, shop: ShopData) -> None:
+    """Delivered 45 days ago, so the 30-day window has passed.
 
     Args:
         shop_repo: Repository on the test shop.
@@ -94,15 +92,15 @@ def test_p4_old_delivery_is_outside_window(
 @pytest.mark.parametrize(
     ("order", "code"),
     [
-        pytest.param("shipped", ReasonCode.NOT_DELIVERED, id="p5-still-shipped"),
-        pytest.param("cancelled", ReasonCode.ORDER_CANCELLED, id="p6-cancelled"),
-        pytest.param("returned", ReasonCode.ALREADY_RETURNED, id="p7-already-returned"),
+        pytest.param("shipped", ReasonCode.NOT_DELIVERED, id="still-shipped"),
+        pytest.param("cancelled", ReasonCode.ORDER_CANCELLED, id="cancelled"),
+        pytest.param("returned", ReasonCode.ALREADY_RETURNED, id="already-returned"),
     ],
 )
-def test_p5_p6_p7_order_cannot_be_returned(
+def test_order_cannot_be_returned(
     shop_repo: SqliteOrderRepository, shop: ShopData, order: str, code: ReasonCode
 ) -> None:
-    """P5-P7: not delivered yet, cancelled, or already returned: nothing to return.
+    """Not delivered yet, cancelled, or already returned: nothing to return.
 
     Args:
         shop_repo: Repository on the test shop.
@@ -117,10 +115,8 @@ def test_p5_p6_p7_order_cannot_be_returned(
     assert {i.reason_code for i in result.items} == {code}
 
 
-def test_p8_single_item_of_multi_item_order(
-    shop_repo: SqliteOrderRepository, shop: ShopData
-) -> None:
-    """P8: checking just one item of a two-item order returns that item only.
+def test_single_item_of_multi_item_order(shop_repo: SqliteOrderRepository, shop: ShopData) -> None:
+    """Checking just one item of a two-item order returns that item only.
 
     Args:
         shop_repo: Repository on the test shop.
@@ -160,10 +156,10 @@ def test_all_items_checked_when_none_given(
     [service.check_cancellation_eligibility, service.check_return_eligibility],
     ids=["cancel", "return"],
 )
-def test_s1_other_users_order_is_not_found(
+def test_other_users_order_is_not_found(
     shop_repo: SqliteOrderRepository, shop: ShopData, check: Check
 ) -> None:
-    """S1 / rule 4: another customer's order gives the same answer as a missing one.
+    """Rule 4: another customer's order gives the same answer as a missing one.
 
     Args:
         shop_repo: Repository on the test shop.
@@ -211,7 +207,7 @@ def test_duplicate_item_ids_are_checked_once(
 def test_return_request_row_counts_as_returned(
     shop_repo: SqliteOrderRepository, shop: ShopData
 ) -> None:
-    """An item with a row in ``return_requests`` is already returned (prepares W5).
+    """An item with a row in ``return_requests`` is already returned.
 
     Args:
         shop_repo: Repository on the test shop.
@@ -230,8 +226,8 @@ def test_return_request_row_counts_as_returned(
     assert (result.reason_code, result.eligible) == (ReasonCode.ALREADY_RETURNED, False)
 
 
-def test_q3_unnamed_item_keeps_null_name(shop_repo: SqliteOrderRepository, shop: ShopData) -> None:
-    """Q3: an item without a product name is shown with an explicit null name.
+def test_unnamed_item_keeps_null_name(shop_repo: SqliteOrderRepository, shop: ShopData) -> None:
+    """An item without a product name is shown with an explicit null name.
 
     Args:
         shop_repo: Repository on the test shop.

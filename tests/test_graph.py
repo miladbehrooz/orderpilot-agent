@@ -67,8 +67,8 @@ def _state(*messages: object, **fields: object) -> AgentState:
     return cast(AgentState, {"messages": msgs, **fields})
 
 
-def test_au5_only_verify_tool_before_verification(tools: list[BaseTool]) -> None:
-    """AU5 / rule 3: before verification the model gets verify_customer only.
+def test_only_verify_tool_before_verification(tools: list[BaseTool]) -> None:
+    """Rule 3: before verification the model gets verify_customer only.
 
     Args:
         tools: Agent tools.
@@ -94,8 +94,8 @@ def test_verify_tool_dropped_after_verification(tools: list[BaseTool]) -> None:
     ("failed", "expected"),
     [pytest.param(0, "agent", id="open"), pytest.param(3, "locked_reply", id="locked")],
 )
-def test_au3_route_entry(failed: int, expected: str) -> None:
-    """AU3: a locked conversation skips the model at the start of a turn.
+def test_route_entry(failed: int, expected: str) -> None:
+    """A locked conversation skips the model at the start of a turn.
 
     Args:
         failed: Failed attempts in state.
@@ -108,8 +108,8 @@ def test_au3_route_entry(failed: int, expected: str) -> None:
     ("failed", "expected"),
     [pytest.param(1, "agent", id="open"), pytest.param(3, "locked_reply", id="locked")],
 )
-def test_au3_route_after_tools(failed: int, expected: str) -> None:
-    """AU3: the tool call that locks verification goes straight to the fixed reply.
+def test_route_after_tools(failed: int, expected: str) -> None:
+    """The tool call that locks verification goes straight to the fixed reply.
 
     Args:
         failed: Failed attempts in state after the tools ran.
@@ -162,10 +162,10 @@ def test_graph_has_expected_nodes(unreachable_model: ChatOpenAI, tools: list[Bas
     assert graph.config["recursion_limit"] == settings.AGENT_RECURSION_LIMIT
 
 
-def test_au3_locked_conversation_gets_fixed_reply_without_model(
+def test_locked_conversation_gets_fixed_reply_without_model(
     unreachable_model: ChatOpenAI, tools: list[BaseTool]
 ) -> None:
-    """AU3: a locked conversation answers with LOCKED_REPLY and never calls the model.
+    """A locked conversation answers with LOCKED_REPLY and never calls the model.
 
     The model points at a closed port, so any call would fail the test.
 
@@ -181,10 +181,10 @@ def test_au3_locked_conversation_gets_fixed_reply_without_model(
     assert not any(isinstance(m, ToolMessage) for m in result["messages"])
 
 
-def test_s1_client_cannot_set_user_id_through_input(
+def test_client_cannot_set_user_id_through_input(
     unreachable_model: ChatOpenAI, tools: list[BaseTool]
 ) -> None:
-    """S1 / rule 2: user_id sent in the graph input is dropped (input accepts messages only).
+    """Rule 2: user_id sent in the graph input is dropped (input accepts messages only).
 
     A locked thread is used so the run never reaches the model.
 
