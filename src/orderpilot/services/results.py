@@ -19,6 +19,12 @@ class ReasonCode(StrEnum):
 
     OK = "OK"
     NOT_FOUND = "NOT_FOUND"
+    ELIGIBLE = "ELIGIBLE"
+    ALREADY_SHIPPED = "ALREADY_SHIPPED"
+    NOT_DELIVERED = "NOT_DELIVERED"
+    WINDOW_EXPIRED = "WINDOW_EXPIRED"
+    ALREADY_RETURNED = "ALREADY_RETURNED"
+    ORDER_CANCELLED = "ORDER_CANCELLED"
     VERIFIED = "VERIFIED"
     NOT_MATCHED = "NOT_MATCHED"
     MISSING_DETAILS = "MISSING_DETAILS"
@@ -77,7 +83,37 @@ class VerificationOutcome:
     counts_as_failure: bool = False
 
 
-class ItemView(BaseModel):
+class ShowsNulls(BaseModel):
+    """Base for item models whose ``always_shown`` fields stay visible as ``null``.
+
+    ``ToolResult.to_content`` drops ``None`` fields to keep results short. Some fields
+    must still appear when empty, so the model can see that e.g. a product name is
+    missing instead of guessing one (Q3).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    always_shown: ClassVar[frozenset[str]] = frozenset()
+
+    @model_serializer(mode="wrap")
+    def _keep_always_shown(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        """Serialize normally, then put back ``always_shown`` fields if they were dropped.
+
+        Args:
+            handler: Pydantic's default serializer for this model.
+
+        Returns:
+            The serialized fields in declaration order.
+        """
+        data: dict[str, Any] = handler(self)
+        return {
+            name: data.get(name, getattr(self, name))
+            for name in type(self).model_fields
+            if name in data or name in self.always_shown
+        }
+
+
+class ItemView(ShowsNulls):
     """One order item as the model sees it. Internal ids (product, inventory) stay hidden.
 
     Attributes:
@@ -92,10 +128,6 @@ class ItemView(BaseModel):
         returned_on: Return date, if returned.
     """
 
-    model_config = ConfigDict(frozen=True)
-
-    # Kept as explicit nulls despite `exclude_none`, so the model can see that a name or
-    # brand is missing instead of guessing one (Q3).
     always_shown: ClassVar[frozenset[str]] = frozenset({"product_name", "brand"})
 
     order_item_id: int
@@ -107,23 +139,6 @@ class ItemView(BaseModel):
     shipped_on: date | None = None
     delivered_on: date | None = None
     returned_on: date | None = None
-
-    @model_serializer(mode="wrap")
-    def _keep_missing_names(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
-        """Serialize normally, then put back ``product_name``/``brand`` if they were dropped.
-
-        Args:
-            handler: Pydantic's default serializer for this model.
-
-        Returns:
-            The serialized fields in declaration order.
-        """
-        data: dict[str, Any] = handler(self)
-        return {
-            name: data.get(name, getattr(self, name))
-            for name in type(self).model_fields
-            if name in data or name in self.always_shown
-        }
 
 
 class OrderSummary(BaseModel):
@@ -194,13 +209,90 @@ class OrderDetailsResult(ToolResult):
     order: OrderDetails | None = None
 
 
+class CancellationResult(ToolResult):
+    """Result of ``check_cancellation_eligibility`` (P1, P2). It only checks; it never cancels.
+
+    ``reason_code`` is ``ELIGIBLE`` or the reason it can't be cancelled. All other fields
+    are unset when the order was not found.
+
+    Attributes:
+        order_id: The order checked.
+        status: Its status, which decides eligibility (only Processing can be cancelled).
+        eligible: Whether the order can be cancelled.
+        created_on: Order date.
+        shipped_on: Ship date, if shipped.
+        delivered_on: Delivery date, if delivered.
+    """
+
+    order_id: int | None = None
+    status: OrderStatus | None = None
+    eligible: bool | None = None
+    created_on: date | None = None
+    shipped_on: date | None = None
+    delivered_on: date | None = None
+
+
+class ItemReturnView(ShowsNulls):
+    """The return decision for one item (P3-P8).
+
+    Attributes:
+        order_item_id: The item checked.
+        product_name: Product name; serialised as ``null`` when missing (Q3).
+        category: Product category.
+        sale_price: Price paid.
+        eligible: Whether this item can be returned.
+        reason_code: ``ELIGIBLE`` or why it can't be returned.
+        refund_amount: Refund if returned (its sale price); only set when eligible.
+        delivered_on: Delivery date, if delivered.
+        days_since_delivery: Calendar days since delivery, if delivered.
+        return_deadline: Last day a return is accepted, if delivered.
+    """
+
+    always_shown: ClassVar[frozenset[str]] = frozenset({"product_name"})
+
+    order_item_id: int
+    product_name: str | None
+    category: str
+    sale_price: float
+    eligible: bool
+    reason_code: ReasonCode
+    refund_amount: float | None = None
+    delivered_on: date | None = None
+    days_since_delivery: int | None = None
+    return_deadline: date | None = None
+
+
+class ReturnEligibilityResult(ToolResult):
+    """Result of ``check_return_eligibility``. It only checks; it never records a return.
+
+    ``reason_code`` is ``ELIGIBLE`` if at least one checked item can be returned,
+    otherwise the code the items share (or the first item's, if they differ). All other
+    fields are unset when the order or an item was not found.
+
+    Attributes:
+        order_id: The order checked.
+        eligible: Whether at least one checked item can be returned.
+        refund_total: Sum of the refunds of the eligible items.
+        items: One decision per checked item.
+    """
+
+    order_id: int | None = None
+    eligible: bool | None = None
+    refund_total: float | None = None
+    items: list[ItemReturnView] | None = None
+
+
 __all__ = [
+    "CancellationResult",
+    "ItemReturnView",
     "ItemView",
     "OrderDetails",
     "OrderDetailsResult",
     "OrderListResult",
     "OrderSummary",
     "ReasonCode",
+    "ReturnEligibilityResult",
+    "ShowsNulls",
     "ToolResult",
     "VerificationOutcome",
     "VerifyResult",

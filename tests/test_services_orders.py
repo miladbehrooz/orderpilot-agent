@@ -191,10 +191,10 @@ def test_has_more_when_limit_cuts_the_list(
         shop: Test shop ids.
     """
     cut = service.list_my_orders(shop_repo, shop.customer_id, limit=3)
-    exact = service.list_my_orders(shop_repo, shop.customer_id, limit=7)
+    exact = service.list_my_orders(shop_repo, shop.customer_id, limit=9)
     assert cut.orders is not None and len(cut.orders) == 3
     assert cut.has_more is True
-    assert exact.orders is not None and len(exact.orders) == 7
+    assert exact.orders is not None and len(exact.orders) == 9
     assert exact.has_more is False
 
 

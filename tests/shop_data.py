@@ -27,6 +27,8 @@ class ShopOrders:
             of them a product without name or brand (L3, L4, Q3).
         returned: Customer's order with both items returned (L5).
         cancelled: Customer's cancelled order.
+        delivered_recently: Customer's order delivered 5 days ago (P3).
+        delivered_long_ago: Customer's order delivered 45 days ago (P4).
         other_users: An order of a different customer (S1).
     """
 
@@ -37,6 +39,8 @@ class ShopOrders:
     complete: int
     returned: int
     cancelled: int
+    delivered_recently: int
+    delivered_long_ago: int
     other_users: int
 
 
@@ -204,6 +208,24 @@ def build_shop_db(path: Path, today: datetime) -> ShopData:
             returned_at=ago(15),
         )
         add_order(107, customer, "Cancelled", [(1071, socks, 5.0)], created_at=ago(10))
+        add_order(
+            108,
+            customer,
+            "Complete",
+            [(1081, shirt, 45.0)],
+            created_at=ago(9),
+            shipped_at=ago(8),
+            delivered_at=ago(5),
+        )
+        add_order(
+            109,
+            customer,
+            "Complete",
+            [(1091, socks, 11.0)],
+            created_at=ago(50),
+            shipped_at=ago(48),
+            delivered_at=ago(45),
+        )
         add_order(301, other, "Processing", [(3011, socks, 8.0)], created_at=ago(3))
         con.commit()
 
@@ -221,6 +243,8 @@ def build_shop_db(path: Path, today: datetime) -> ShopData:
             complete=105,
             returned=106,
             cancelled=107,
+            delivered_recently=108,
+            delivered_long_ago=109,
             other_users=301,
         ),
         unnamed_item_id=1052,

@@ -102,9 +102,11 @@ def test_list_orders_newest_first(shop_repo: SqliteOrderRepository, shop: ShopDa
     assert _list(shop_repo, shop.customer_id) == [
         o.processing,
         o.shipped,
+        o.delivered_recently,
         o.cancelled,
         o.returned,
         o.complete,
+        o.delivered_long_ago,
         o.lost,
         o.stuck,
     ]

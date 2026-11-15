@@ -56,6 +56,7 @@ class OrderItem:
         shipped_at: When it shipped, if it has.
         delivered_at: When it was delivered, if it has been.
         returned_at: When it was returned, if it has been.
+        return_requested: Whether a return request exists for it (``return_requests``).
     """
 
     order_item_id: int
@@ -68,6 +69,7 @@ class OrderItem:
     shipped_at: datetime | None
     delivered_at: datetime | None
     returned_at: datetime | None
+    return_requested: bool = False
 
 
 @dataclass(frozen=True, slots=True)

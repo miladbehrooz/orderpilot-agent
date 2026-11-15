@@ -1,62 +1,27 @@
 """Lookup tools through a real ToolNode: auth guard, user_id from state, argument errors."""
 
-import json
-from typing import Any, cast
+from typing import Any
 
 import pytest
 from langchain.tools import BaseTool
-from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.utils.function_calling import convert_to_openai_tool
-from langgraph.graph import END, START, StateGraph
-from langgraph.prebuilt import ToolNode
 
-from orderpilot.agent.graph import handle_tool_error
-from orderpilot.agent.state import AgentState
 from orderpilot.repository import SqliteOrderRepository
-from orderpilot.tools import VERIFY_TOOL_NAME, build_tools
 from tests.shop_data import ShopData
-
-
-def _call(
-    repo: SqliteOrderRepository, name: str, args: dict[str, Any], **state: Any
-) -> dict[str, Any]:
-    """Run one tool call through a one-node graph holding the production ToolNode setup.
-
-    Args:
-        repo: Repository the tools use.
-        name: Tool to call.
-        args: Tool-call arguments, as the model would send them.
-        **state: Initial state besides the messages, e.g. ``user_id=1``.
-
-    Returns:
-        The parsed JSON content of the resulting ToolMessage.
-    """
-    graph = (
-        StateGraph(AgentState)
-        .add_node("tools", ToolNode(build_tools(repo), handle_tool_errors=handle_tool_error))
-        .add_edge(START, "tools")
-        .add_edge("tools", END)
-        .compile()
-    )
-    call = {"name": name, "args": args, "id": "call-1", "type": "tool_call"}
-    initial = cast(AgentState, {"messages": [AIMessage("", tool_calls=[call])], **state})
-    result: dict[str, Any] = graph.invoke(initial)
-    (message,) = [m for m in result["messages"] if isinstance(m, ToolMessage)]
-    content: dict[str, Any] = json.loads(message.text)
-    return content
+from tests.tool_runner import run_tool_call, tools_named
 
 
 @pytest.fixture
 def lookup_tools(shop_repo: SqliteOrderRepository) -> list[BaseTool]:
-    """Return every tool except ``verify_customer``.
+    """Return the two lookup tools.
 
     Args:
         shop_repo: Repository on the test shop.
 
     Returns:
-        The customer tools.
+        ``list_my_orders`` and ``get_order_details``.
     """
-    return [t for t in build_tools(shop_repo) if t.name != VERIFY_TOOL_NAME]
+    return tools_named(shop_repo, "list_my_orders", "get_order_details")
 
 
 def test_lookup_tools_are_registered(lookup_tools: list[BaseTool]) -> None:
@@ -82,7 +47,7 @@ def test_au5_lookup_tools_refuse_without_verification(
         name: Tool to call.
         args: Valid arguments for it.
     """
-    assert _call(shop_repo, name, args) == {"reason_code": "NOT_VERIFIED"}
+    assert run_tool_call(shop_repo, name, args) == {"reason_code": "NOT_VERIFIED"}
 
 
 def test_s1_tool_schemas_have_no_user_id(lookup_tools: list[BaseTool]) -> None:
@@ -106,8 +71,8 @@ def test_s1_user_id_comes_from_state(shop_repo: SqliteOrderRepository, shop: Sho
         shop: Test shop ids.
     """
     args = {"order_id": shop.orders.other_users}
-    as_customer = _call(shop_repo, "get_order_details", args, user_id=shop.customer_id)
-    as_owner = _call(shop_repo, "get_order_details", args, user_id=shop.other_id)
+    as_customer = run_tool_call(shop_repo, "get_order_details", args, user_id=shop.customer_id)
+    as_owner = run_tool_call(shop_repo, "get_order_details", args, user_id=shop.other_id)
     assert as_customer == {"reason_code": "NOT_FOUND"}
     assert as_owner["reason_code"] == "OK"
 
@@ -121,7 +86,7 @@ def test_list_my_orders_returns_customer_orders(
         shop_repo: Repository on the test shop.
         shop: Test shop ids.
     """
-    content = _call(
+    content = run_tool_call(
         shop_repo,
         "list_my_orders",
         {"status": "Shipped", "date_from": "2026-11-01"},
@@ -156,6 +121,6 @@ def test_invalid_arguments_return_structured_error(
         args: Invalid arguments.
         field: The argument the error must mention.
     """
-    content = _call(shop_repo, name, args, user_id=shop.customer_id)
+    content = run_tool_call(shop_repo, name, args, user_id=shop.customer_id)
     assert content["reason_code"] == "INVALID_ARGUMENTS"
     assert field in content["detail"]
