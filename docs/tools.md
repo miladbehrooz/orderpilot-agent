@@ -34,13 +34,31 @@ _Draft, 2026-11-12. Derived from `scenarios.md`._
 
 The stuck/lost flags and day counts come from pure functions in `src/orderpilot/policy.py` (counted in calendar days against `meta.reference_now`), which the eligibility and write tools will share.
 
+Both eligibility tools only check; they never change an order. Their decisions come from `cancel_decision` / `return_decision` in `src/orderpilot/policy.py`, which the Milestone 2 write tools re-run before writing (rule 7). There is no `explanation` text: the tools return codes and facts, and the LLM explains them.
+
 ### 4. `check_cancellation_eligibility(order_id)`
-- Returns `{eligible, reason_code, explanation}`.
+- Returns `reason_code`, `eligible`, `order_id`, `status`, `created_on`, `shipped_on`, `delivered_on`.
+- Only Processing orders can be cancelled (a stuck one too). Codes by status:
+
+  | Status | `reason_code` |
+  |---|---|
+  | Processing | `ELIGIBLE` |
+  | Shipped, Complete | `ALREADY_SHIPPED` (it can be returned once delivered) |
+  | Returned | `ALREADY_RETURNED` |
+  | Cancelled | `ORDER_CANCELLED` |
+- An order that doesn't exist or belongs to another user returns only `NOT_FOUND`.
 - Scenarios: P1, P2
 
 ### 5. `check_return_eligibility(order_id, order_item_ids=None)`
-- Checks each item (all items if none are given): `{eligible, reason_code, refund_amount, delivered_at, days_since_delivery, return_deadline}`.
-- Also takes Milestone 2 `return_requests` into account.
+- Checks each requested item (all items if `order_item_ids` is omitted; duplicates are ignored). Each item: `order_item_id`, `product_name` (explicit `null` if missing), `category`, `sale_price`, `eligible`, `reason_code`, `refund_amount` (only when eligible; equals `sale_price`), `delivered_on`, `days_since_delivery`, `return_deadline`.
+- Item codes, first match wins:
+  1. Returned, or a row in `return_requests` → `ALREADY_RETURNED`
+  2. Cancelled → `ORDER_CANCELLED`
+  3. Not delivered (Processing, Shipped, or no delivery date) → `NOT_DELIVERED`
+  4. More than `RETURN_WINDOW_DAYS` calendar days since delivery → `WINDOW_EXPIRED`. Day 30 is still eligible, day 31 is not; `return_deadline = delivered_on + 30 days`.
+  5. Otherwise → `ELIGIBLE`
+- Top level: `order_id`, `eligible` (any item eligible), `refund_total` (sum over eligible items) and a `reason_code` that is `ELIGIBLE` if any item is eligible, otherwise the code the items share (or the first item's, if they differ).
+- `NOT_FOUND` with nothing checked if the order isn't the customer's, or if any requested item is not in that order (`detail` lists those ids). This matches the all-or-nothing behaviour of `return_items`. An empty `order_item_ids` list is `INVALID_ARGUMENTS`.
 - Scenarios: P3–P8
 
 Finding a specific item ("the blue thing", "the shirt") is done by combining `list_my_orders` and `get_order_details`. There is no dedicated search tool, so AM1, P8 and W4 also test multi-step reasoning.

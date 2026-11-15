@@ -85,6 +85,8 @@ def test_verify_tool_dropped_after_verification(tools: list[BaseTool]) -> None:
     assert [t.name for t in select_tools(_state(user_id=1), tools)] == [
         "list_my_orders",
         "get_order_details",
+        "check_cancellation_eligibility",
+        "check_return_eligibility",
     ]
 
 

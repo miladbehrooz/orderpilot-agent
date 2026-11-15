@@ -43,6 +43,7 @@ def _item_from_row(row: sqlite3.Row) -> OrderItem:
         shipped_at=_optional_timestamp(row["shipped_at"]),
         delivered_at=_optional_timestamp(row["delivered_at"]),
         returned_at=_optional_timestamp(row["returned_at"]),
+        return_requested=bool(row["return_requested"]),
     )
 
 
@@ -81,13 +82,16 @@ def _load_items(con: sqlite3.Connection, order_ids: Sequence[int]) -> dict[int, 
         return {}
     # Only "?" placeholders are interpolated into the SQL; the ids are bound parameters.
     placeholders = ", ".join("?" * len(order_ids))
-    # LEFT JOIN so an item whose product has no name/brand still comes back (Q3).
+    # LEFT JOIN products so an item whose product has no name/brand still comes back (Q3),
+    # and return_requests so an item with a recorded return counts as returned (W5).
     rows = con.execute(
         f"""
         SELECT oi.order_id, oi.id, oi.sale_price, oi.status, oi.created_at, oi.shipped_at,
-               oi.delivered_at, oi.returned_at, p.name, p.brand, p.category
+               oi.delivered_at, oi.returned_at, p.name, p.brand, p.category,
+               rr.return_id IS NOT NULL AS return_requested
         FROM order_items AS oi
         LEFT JOIN products AS p ON p.id = oi.product_id
+        LEFT JOIN return_requests AS rr ON rr.order_item_id = oi.id
         WHERE oi.order_id IN ({placeholders})
         ORDER BY oi.id
         """,
