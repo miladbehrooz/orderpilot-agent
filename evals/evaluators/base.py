@@ -16,6 +16,7 @@ from langsmith.schemas import Example, Run
 from openevals.llm import create_llm_as_judge
 from pydantic import BaseModel, Field
 
+from evals.prompts import prompt_for
 from orderpilot.observability import logger
 
 EvaluatorKind = Literal["gate", "score"]
@@ -114,19 +115,18 @@ class LLMJudgeEvaluator(Evaluator):
             so it counts days from the same date the agent and the references use.
 
     Attributes:
-        prompt: ``str.format`` template of the judge prompt.
-        prompt_version: Version of ``prompt``, recorded in results and experiment metadata.
+        prompt_version: Version of the judge prompt (see ``evals/prompts.py``), recorded in
+            results and experiment metadata. The prompt text is looked up from it.
         today: ``reference_now`` as an ISO date, the ``{today}`` placeholder of the prompt.
     """
 
-    prompt: ClassVar[str]
     prompt_version: ClassVar[str]
 
     def __init__(self, judge: BaseChatModel, reference_now: datetime) -> None:
         super().__init__()
         self.today = reference_now.date().isoformat()
         self._judge = create_llm_as_judge(
-            prompt=self.prompt,
+            prompt=prompt_for(self.key, self.prompt_version),
             judge=judge,
             feedback_key=self.key,
             output_schema=JudgeVerdict,

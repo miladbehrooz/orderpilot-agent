@@ -13,6 +13,7 @@ import pytest
 from langchain_core.language_models import BaseChatModel
 from langsmith.evaluation.evaluator import run_evaluator
 from langsmith.schemas import Example, Run
+from pydantic import ValidationError
 from pytest_mock import MockerFixture, MockType
 
 from evals.errors import EvalSetupError
@@ -23,6 +24,7 @@ from evals.evaluators import (
 )
 from evals.evaluators import base as base_module
 from evals.evaluators import factory as factory_module
+from evals.prompts import JUDGE_PROMPTS, JudgePrompt, prompt_for
 
 RunFactory = Callable[..., Run]
 ExampleFactory = Callable[..., Example]
@@ -256,12 +258,30 @@ def test_answer_correctness_shows_judge_only_question_answer_and_reference(
 
 
 def test_answer_correctness_prompt_has_every_placeholder() -> None:
-    """The prompt template fills with exactly the variables the evaluator passes."""
-    filled = AnswerCorrectnessEvaluator.prompt.format(
+    """The v2 prompt fills with exactly the variables the evaluator passes."""
+    filled = prompt_for("answer_correctness", "v2").format(
         question="Q", answer="A", expected_outcome="E", key_facts="F", today="2026-11-12"
     )
     assert all(f"\n{value}\n" in filled for value in "QAEF")
     assert "Today is 2026-11-12." in filled
+
+
+def test_every_prompt_version_is_registered_once() -> None:
+    """Each metric and version pair appears once, so a lookup is never ambiguous."""
+    pairs = [(p.metric, p.version) for p in JUDGE_PROMPTS]
+    assert len(pairs) == len(set(pairs))
+
+
+def test_unknown_prompt_version_names_the_known_ones() -> None:
+    """Asking for a version that doesn't exist fails with the versions that do."""
+    with pytest.raises(EvalSetupError, match="answer_correctness v1"):
+        prompt_for("answer_correctness", "v9")
+
+
+def test_prompt_version_must_look_like_a_version() -> None:
+    """A version such as ``V2`` is rejected when the prompt is defined."""
+    with pytest.raises(ValidationError):
+        JudgePrompt(metric="answer_correctness", version="V2", text="x")
 
 
 def test_langsmith_accepts_evaluator_object(

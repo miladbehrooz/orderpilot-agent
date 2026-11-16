@@ -107,8 +107,7 @@ class Evaluator(ABC):
     def evaluate(self, run: Run, example: Example) -> list[EvaluationResult]: ...
 
 
-class LLMJudgeEvaluator(Evaluator):  # holds the judge and a versioned prompt
-    prompt: ClassVar[str]
+class LLMJudgeEvaluator(Evaluator):  # holds the judge; the prompt is looked up by version
     prompt_version: ClassVar[str]
 
     def __init__(self, judge: BaseChatModel) -> None: ...
@@ -146,7 +145,7 @@ class EvaluatorFactory:
 - **Judge sees:** today's date (the database's `reference_now`, so day counts are checked against the same date the agent used), the question, the final answer and the reference (`expected_outcome`, `key_facts`). It does **not** see tool outputs (that is groundedness, a later metric) or any metadata.
 - **Output schema:** `reasoning` (written first), then `verdict: bool`. Pass/fail only, no 1–5 scale: it is easier to calibrate and easier to act on.
 - **Rubric (v2):** the decision matches the expected outcome; the key facts that are stated are correct, with day counts checked against today's date; nothing contradicts the reference; the reason is given only when the question asks why or how. Leaving out extra detail is fine; a wrong fact fails the answer.
-- **The prompt** is a versioned constant in `evals/prompts.py` (`ANSWER_CORRECTNESS_V2`; V1 is kept for the record), and its version goes into the experiment metadata.
+- **The prompt** is a `JudgePrompt` (metric, version, text) in `JUDGE_PROMPTS` in `evals/prompts.py`. The evaluator stores only its `prompt_version` (`v2`), and `prompt_for` looks up the text. Old versions (`v1`) stay in the list so past experiments can be reproduced. The version goes into the experiment metadata.
 - **First slice:** P1–P8 plus L1, L3, L5 and L6, which have clear references. AM1, L2 and S need behaviour rubrics, and AU needs unverified starts; they come later.
 
 ## 4. Orchestration: `run.py`

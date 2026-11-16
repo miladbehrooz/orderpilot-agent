@@ -1,15 +1,40 @@
 """Versioned prompts of the LLM judges.
 
-A prompt is never edited in place once it has been used in an experiment: a change gets a
-new constant (``..._V2``) and a new ``prompt_version`` on its evaluator, so experiments
-graded by different prompts are never compared as if they were the same metric.
+A prompt is never edited in place once it has been used in an experiment: a change is added
+as a new entry with a new version, and the evaluator's ``prompt_version`` is bumped, so
+experiments graded by different prompts are never compared as if they were the same metric.
 
 The prompts are ``str.format`` templates: literal braces must be doubled.
 """
 
 from typing import Final
 
-ANSWER_CORRECTNESS_V1: Final = """\
+from pydantic import BaseModel, ConfigDict, Field
+
+from evals.errors import EvalSetupError
+
+
+class JudgePrompt(BaseModel):
+    """One version of one judge prompt.
+
+    Attributes:
+        metric: Metric the prompt grades, e.g. ``answer_correctness``.
+        version: Prompt version, ``v`` followed by a number, e.g. ``v2``.
+        text: The ``str.format`` template sent to the judge.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    metric: str = Field(pattern=r"^[a-z_]+$")
+    version: str = Field(pattern=r"^v\d+$")
+    text: str = Field(min_length=1)
+
+
+JUDGE_PROMPTS: Final = (
+    JudgePrompt(
+        metric="answer_correctness",
+        version="v1",
+        text="""\
 You grade a customer-support agent of an online clothing shop.
 Decide whether the agent's ANSWER is correct, given the REFERENCE written by a human expert.
 
@@ -43,10 +68,12 @@ Offering further help or mentioning that customer support can process a request 
 A wrong decision or a wrong fact makes the answer INCORRECT.
 
 Reason step by step first, then give the verdict.
-"""
-"""Answer correctness against a hand-written reference. Tool outputs are not shown."""
-
-ANSWER_CORRECTNESS_V2: Final = """\
+""",
+    ),
+    JudgePrompt(
+        metric="answer_correctness",
+        version="v2",
+        text="""\
 You grade a customer-support agent of an online clothing shop.
 Decide whether the agent's ANSWER is correct, given the REFERENCE written by a human expert.
 
@@ -85,7 +112,29 @@ Offering further help or mentioning that customer support can process a request 
 A wrong decision or a wrong fact makes the answer INCORRECT.
 
 Reason step by step first, then give the verdict.
-"""
-"""Answer correctness, v2: adds today's date and only requires the reason when it is asked for."""
+""",
+    ),
+)
 
-__all__ = ["ANSWER_CORRECTNESS_V1", "ANSWER_CORRECTNESS_V2"]
+
+def prompt_for(metric: str, version: str) -> str:
+    """Return the judge prompt of one metric and version.
+
+    Args:
+        metric: Metric name, e.g. ``"answer_correctness"``.
+        version: Prompt version, e.g. ``"v2"``.
+
+    Returns:
+        The ``str.format`` template of the prompt.
+
+    Raises:
+        EvalSetupError: If no prompt exists for that metric and version.
+    """
+    for prompt in JUDGE_PROMPTS:
+        if prompt.metric == metric and prompt.version == version:
+            return prompt.text
+    known = ", ".join(f"{p.metric} {p.version}" for p in JUDGE_PROMPTS)
+    raise EvalSetupError(f"No judge prompt for {metric} {version}. Known: {known}")
+
+
+__all__ = ["JUDGE_PROMPTS", "JudgePrompt", "prompt_for"]
