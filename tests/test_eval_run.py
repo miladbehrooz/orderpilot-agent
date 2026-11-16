@@ -114,7 +114,7 @@ def test_run_passes_repeats_concurrency_and_metadata_to_evaluate(
     assert call.kwargs["num_repetitions"] == 2
     assert call.kwargs["max_concurrency"] == 5
     assert call.kwargs["error_handling"] == "log"
-    assert call.kwargs["metadata"]["judge_prompts"] == {"answer_correctness": "v1"}
+    assert call.kwargs["metadata"]["judge_prompts"] == {"answer_correctness": "v2"}
     assert call.kwargs["metadata"]["reference_now"] == "2026-11-12T00:00:00+00:00"
 
 
@@ -169,7 +169,7 @@ def test_experiment_metadata_contains_versions_and_git_sha(
     )
     assert metadata["agent_model"] == "claude-agent"
     assert metadata["judge_model"] == "gpt-judge"
-    assert metadata["judge_prompts"] == {"answer_correctness": "v1"}
+    assert metadata["judge_prompts"] == {"answer_correctness": "v2"}
     assert metadata["git_sha"] == "abc1234"
     assert metadata["split"] == "full"
 

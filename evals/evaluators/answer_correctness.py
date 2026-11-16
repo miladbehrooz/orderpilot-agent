@@ -6,7 +6,7 @@ from langsmith.evaluation.evaluator import EvaluationResult
 from langsmith.schemas import Example, Run
 
 from evals.evaluators.base import LLMJudgeEvaluator
-from evals.prompts import ANSWER_CORRECTNESS_V1
+from evals.prompts import ANSWER_CORRECTNESS_V2
 
 
 class AnswerCorrectnessEvaluator(LLMJudgeEvaluator):
@@ -20,8 +20,8 @@ class AnswerCorrectnessEvaluator(LLMJudgeEvaluator):
     """
 
     key = "answer_correctness"
-    prompt = ANSWER_CORRECTNESS_V1
-    prompt_version = "v1"
+    prompt = ANSWER_CORRECTNESS_V2
+    prompt_version = "v2"
 
     def evaluate(self, run: Run, example: Example) -> list[EvaluationResult]:
         """Ask the judge whether the answer is correct.

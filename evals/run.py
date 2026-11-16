@@ -219,7 +219,7 @@ def run_experiment(args: RunArgs, client: Client, repo: OrderRepository) -> Repo
     )
     examples = select_examples(client, remote.id, args.split, args.families)
     metrics = metrics_for(examples, args.metrics)
-    evaluators = EvaluatorFactory.build(metrics)
+    evaluators = EvaluatorFactory.build(metrics, repo.reference_now())
     results = client.evaluate(
         AgentTarget(repo).invoke,
         data=examples,

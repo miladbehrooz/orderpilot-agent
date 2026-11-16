@@ -7,6 +7,7 @@ empty ``results`` list, which is how "not applicable" emits no feedback.
 """
 
 from abc import ABC, abstractmethod
+from datetime import datetime
 from typing import Any, ClassVar, Literal
 
 from langchain_core.language_models import BaseChatModel
@@ -109,17 +110,21 @@ class LLMJudgeEvaluator(Evaluator):
 
     Args:
         judge: The judge chat model (from ``build_judge``); it must support structured output.
+        reference_now: TODAY of the database the agent ran on. The judge is told this date,
+            so it counts days from the same date the agent and the references use.
 
     Attributes:
         prompt: ``str.format`` template of the judge prompt.
         prompt_version: Version of ``prompt``, recorded in results and experiment metadata.
+        today: ``reference_now`` as an ISO date, the ``{today}`` placeholder of the prompt.
     """
 
     prompt: ClassVar[str]
     prompt_version: ClassVar[str]
 
-    def __init__(self, judge: BaseChatModel) -> None:
+    def __init__(self, judge: BaseChatModel, reference_now: datetime) -> None:
         super().__init__()
+        self.today = reference_now.date().isoformat()
         self._judge = create_llm_as_judge(
             prompt=self.prompt,
             judge=judge,
@@ -128,15 +133,15 @@ class LLMJudgeEvaluator(Evaluator):
         )
 
     def _ask(self, **variables: Any) -> JudgeVerdict:
-        """Run the judge on the prompt filled with ``variables``.
+        """Run the judge on the prompt filled with ``variables`` and today's date.
 
         Args:
-            **variables: Values for the prompt's placeholders.
+            **variables: Values for the prompt's placeholders, other than ``today``.
 
         Returns:
             The judge's verdict.
         """
-        return JudgeVerdict.model_validate(self._judge(**variables))
+        return JudgeVerdict.model_validate(self._judge(today=self.today, **variables))
 
 
 __all__ = ["Evaluator", "EvaluatorKind", "JudgeVerdict", "LLMJudgeEvaluator"]

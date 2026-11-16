@@ -5,6 +5,7 @@ the metric's name, and register it in ``_REGISTRY``.
 """
 
 from collections.abc import Sequence
+from datetime import datetime
 from typing import ClassVar
 
 from evals.errors import EvalSetupError
@@ -49,7 +50,7 @@ class EvaluatorFactory:
         return evaluator_cls
 
     @classmethod
-    def build(cls, metrics: Sequence[str]) -> list[Evaluator]:
+    def build(cls, metrics: Sequence[str], reference_now: datetime) -> list[Evaluator]:
         """Build the evaluator of each given metric.
 
         One judge model is built and shared, and only when a selected metric is an LLM
@@ -57,6 +58,7 @@ class EvaluatorFactory:
 
         Args:
             metrics: Metric names, in the order the evaluators should run.
+            reference_now: TODAY of the database under test, given to the LLM judges.
 
         Returns:
             One evaluator per metric.
@@ -71,7 +73,7 @@ class EvaluatorFactory:
         evaluators: list[Evaluator] = []
         for evaluator_cls in classes:
             if issubclass(evaluator_cls, LLMJudgeEvaluator) and judge is not None:
-                evaluators.append(evaluator_cls(judge))
+                evaluators.append(evaluator_cls(judge, reference_now))
             else:
                 evaluators.append(evaluator_cls())
         return evaluators

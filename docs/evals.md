@@ -143,10 +143,10 @@ class EvaluatorFactory:
 
 ### Step 1 metric: `answer_correctness`
 - **Built on** openevals `create_llm_as_judge(prompt=..., judge=<ChatOpenAI from LLMFactory>, output_schema=JudgeVerdict)`. Prompt variables are passed as keyword arguments (`question`, `answer`, `expected_outcome`, `key_facts`). The judge model must support structured output.
-- **Judge sees:** the question, the final answer and the reference (`expected_outcome`, `key_facts`). It does **not** see tool outputs (that is groundedness, a later metric) or any metadata.
+- **Judge sees:** today's date (the database's `reference_now`, so day counts are checked against the same date the agent used), the question, the final answer and the reference (`expected_outcome`, `key_facts`). It does **not** see tool outputs (that is groundedness, a later metric) or any metadata.
 - **Output schema:** `reasoning` (written first), then `verdict: bool`. Pass/fail only, no 1–5 scale: it is easier to calibrate and easier to act on.
-- **Rubric:** the decision matches the expected outcome; the key facts that are stated are correct; nothing contradicts the reference; the reason is explained. Leaving out extra detail is fine; a wrong fact fails the answer.
-- **The prompt** is a versioned constant in `evals/prompts.py` (`ANSWER_CORRECTNESS_V1`), and its version goes into the experiment metadata.
+- **Rubric (v2):** the decision matches the expected outcome; the key facts that are stated are correct, with day counts checked against today's date; nothing contradicts the reference; the reason is given only when the question asks why or how. Leaving out extra detail is fine; a wrong fact fails the answer.
+- **The prompt** is a versioned constant in `evals/prompts.py` (`ANSWER_CORRECTNESS_V2`; V1 is kept for the record), and its version goes into the experiment metadata.
 - **First slice:** P1–P8 plus L1, L3, L5 and L6, which have clear references. AM1, L2 and S need behaviour rubrics, and AU needs unverified starts; they come later.
 
 ## 4. Orchestration: `run.py`

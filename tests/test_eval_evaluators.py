@@ -116,17 +116,20 @@ def judge_fn(mocker: MockerFixture) -> MockType:
 
 
 @pytest.fixture
-def evaluator(mocker: MockerFixture, judge_fn: MockType) -> AnswerCorrectnessEvaluator:
+def evaluator(
+    mocker: MockerFixture, judge_fn: MockType, today: datetime
+) -> AnswerCorrectnessEvaluator:
     """Return the answer-correctness evaluator with a mocked judge.
 
     Args:
         mocker: Pytest-mock fixture.
         judge_fn: The mocked judge callable.
+        today: TODAY of the test shop, given to the judge.
 
     Returns:
         The evaluator.
     """
-    return AnswerCorrectnessEvaluator(mocker.create_autospec(BaseChatModel, instance=True))
+    return AnswerCorrectnessEvaluator(mocker.create_autospec(BaseChatModel, instance=True), today)
 
 
 def _results(output: Any) -> list[Any]:
@@ -226,7 +229,7 @@ def test_answer_correctness_maps_verdict_and_reasoning(
         verdict,
         "Checked the deadline.",
     )
-    assert result.metadata == {"prompt_version": "v1"}
+    assert result.metadata == {"prompt_version": "v2"}
 
 
 def test_answer_correctness_shows_judge_only_question_answer_and_reference(
@@ -235,7 +238,7 @@ def test_answer_correctness_shows_judge_only_question_answer_and_reference(
     make_run: RunFactory,
     make_example: ExampleFactory,
 ) -> None:
-    """The judge gets the question, answer and reference; never tool outputs or metadata.
+    """The judge gets today's date, the question, answer and reference; never tool outputs.
 
     Args:
         evaluator: Evaluator under test.
@@ -245,7 +248,8 @@ def test_answer_correctness_shows_judge_only_question_answer_and_reference(
     """
     evaluator(make_run(answer="Yes."), make_example())
     kwargs = judge_fn.call_args.kwargs
-    assert set(kwargs) == {"question", "answer", "expected_outcome", "key_facts"}
+    assert set(kwargs) == {"today", "question", "answer", "expected_outcome", "key_facts"}
+    assert kwargs["today"] == "2026-11-12"
     assert kwargs["question"] == "Can I return order 7?"
     assert kwargs["answer"] == "Yes."
     assert '"return_deadline": "2026-12-04"' in kwargs["key_facts"]
@@ -254,9 +258,10 @@ def test_answer_correctness_shows_judge_only_question_answer_and_reference(
 def test_answer_correctness_prompt_has_every_placeholder() -> None:
     """The prompt template fills with exactly the variables the evaluator passes."""
     filled = AnswerCorrectnessEvaluator.prompt.format(
-        question="Q", answer="A", expected_outcome="E", key_facts="F"
+        question="Q", answer="A", expected_outcome="E", key_facts="F", today="2026-11-12"
     )
     assert all(f"\n{value}\n" in filled for value in "QAEF")
+    assert "Today is 2026-11-12." in filled
 
 
 def test_langsmith_accepts_evaluator_object(
@@ -289,32 +294,40 @@ def test_langsmith_accepts_not_applicable_result(
     assert _results(output) == []
 
 
-def test_factory_builds_judge_only_when_needed(mocker: MockerFixture, judge_fn: MockType) -> None:
+def test_factory_builds_judge_only_when_needed(
+    mocker: MockerFixture, judge_fn: MockType, today: datetime
+) -> None:
     """The judge is built once for judge metrics, and never for an empty selection.
 
     Args:
         mocker: Pytest-mock fixture.
         judge_fn: The mocked judge callable (keeps the real judge out of the evaluator).
+        today: TODAY of the test shop.
     """
     build_judge = mocker.patch.object(factory_module, "build_judge", autospec=True)
     build_judge.return_value = mocker.create_autospec(BaseChatModel, instance=True)
 
-    assert EvaluatorFactory.build([]) == []
+    assert EvaluatorFactory.build([], today) == []
     build_judge.assert_not_called()
 
-    (built,) = EvaluatorFactory.build(["answer_correctness"])
+    (built,) = EvaluatorFactory.build(["answer_correctness"], today)
     assert isinstance(built, AnswerCorrectnessEvaluator)
     assert built.__name__ == "answer_correctness"
+    assert built.today == "2026-11-12"
     build_judge.assert_called_once_with()
 
 
-def test_factory_rejects_unknown_metric() -> None:
-    """An unknown metric name fails with the list of valid metric names."""
+def test_factory_rejects_unknown_metric(today: datetime) -> None:
+    """An unknown metric name fails with the list of valid metric names.
+
+    Args:
+        today: TODAY of the test shop.
+    """
     with pytest.raises(EvalSetupError, match="answer_correctness"):
-        EvaluatorFactory.build(["answer_corectness"])
+        EvaluatorFactory.build(["answer_corectness"], today)
 
 
 def test_factory_reports_judge_prompt_versions() -> None:
     """Prompt versions of the selected judge metrics go into the experiment metadata."""
-    assert EvaluatorFactory.prompt_versions(["answer_correctness"]) == {"answer_correctness": "v1"}
+    assert EvaluatorFactory.prompt_versions(["answer_correctness"]) == {"answer_correctness": "v2"}
     assert EvaluatorFactory.metric_names() == ["answer_correctness"]
