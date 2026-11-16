@@ -1,6 +1,6 @@
 # E-commerce Support Agent: Evaluation Design (v1)
 
-_Draft, 2026-11-16. Derived from `scenarios.md` and `tools.md`. Nothing here is implemented yet._
+_2026-11-16. Derived from `scenarios.md` and `tools.md`. Step 1 (sections 1–5, 7–9) is implemented; judge calibration (section 6) and later steps are not._
 
 ## Principles
 1. **Grade with code first, then state, then an LLM judge.** Tools return a `reason_code` and the supporting numbers, so most behaviour can be checked by code. An LLM judge is used only where meaning matters: whether the answer is correct, whether it asked a clarifying question, whether it refused.
@@ -13,9 +13,9 @@ _Draft, 2026-11-16. Derived from `scenarios.md` and `tools.md`. Nothing here is 
 ## Tooling decisions
 | Concern | Choice | Why |
 |---|---|---|
-| Orchestration, datasets, experiments, dashboard | **LangSmith** (`langsmith.evaluate`) | Native LangChain/LangGraph tracing, dataset versioning, experiment comparison, annotation queues |
+| Orchestration, datasets, experiments, dashboard | **LangSmith** (`client.evaluate`) | Native LangChain/LangGraph tracing, dataset versioning, experiment comparison, annotation queues |
 | Domain metrics | **Own evaluator classes** in `evals/evaluators/` | The valuable checks (reason codes, leaks, DB state, facts against a reference) are specific to OrderPilot |
-| Generic pieces | **openevals** (LLM-as-judge setup, later the multi-turn simulator); **agentevals** (trajectory match), from step 2 | Not worth hand-rolling; wrapped behind our own classes |
+| Generic pieces | **openevals**: LLM-as-judge setup now; trajectory match (`openevals.trajectory`) from step 2; multi-turn simulator later | Not worth hand-rolling; wrapped behind our own classes |
 | Judge model | **OpenAI**, built through `orderpilot.llm.LLMFactory` | A different provider from the agent; provider and model are configurable |
 | Not used | DeepEval | Overlaps with LangSmith (second dashboard and dataset model), heavy dependency, generic metrics |
 
@@ -23,7 +23,7 @@ _Draft, 2026-11-16. Derived from `scenarios.md` and `tools.md`. Nothing here is 
 ```
 evals/datasets/m1/*.yaml ──sync.py──▶ LangSmith dataset "orderpilot-m1" (versioned, splits)
                                                   │
-                         run.py: evaluate(target, data, evaluators, num_repetitions=k, metadata)
+                  run.py: client.evaluate(target, data, evaluators, num_repetitions=k, metadata)
                                                   │
         ┌─────────────────────────────────────────┼──────────────────────────────────────┐
         ▼                                         ▼                                      ▼
@@ -38,21 +38,23 @@ evals/datasets/m1/*.yaml ──sync.py──▶ LangSmith dataset "orderpilot-m1
 ## 1. Dataset layer
 **The repo is the source of truth, and LangSmith is a copy.** Cases are hand-written YAML files in `evals/datasets/`, reviewed in PRs. `sync.py` upserts them into LangSmith, which keeps the version history. Cases are not edited in the LangSmith UI.
 
-**Case schema**, a Pydantic `EvalCase` model validated on load:
+**Files.** A dataset directory (`evals/datasets/m1/`) holds `dataset.yaml` (`description`, `reference_now`) and one file per scenario family (`P.yaml`, `L.yaml`) with optional `defaults` and a list of `cases`. Each case is merged over its file's defaults, then validated as a Pydantic `EvalCase` (`evals/cases.py`; unknown fields are errors):
 ```yaml
 - case_id: P4-01                 # stable; LangSmith example id = uuid5(case_id)
   scenario_id: P4
   splits: [full, smoke]
   inputs:
-    question: "Can I return order 1234?"
-    user_id: 87                  # used only to seed the verified thread
+    customer_email: christinafranklin@example.com   # who the seeded thread is verified as
+    question: "Can I return order 5110?"
   reference:                     # hand-written; never derived from policy.py
     expected_outcome: >-
-      Not returnable: delivered on 2026-09-28, 45 days ago, outside the 30-day window.
-    key_facts: {order_id: 1234, delivered_on: "2026-09-28", days_since_delivery: 45}
-  evaluators: [answer_correctness]   # optional; defaults per scenario family
-  notes: "Clear case, far past the boundary"
+      No, order 5110 can't be returned. It was delivered on 2026-09-28, 45 days ago, which
+      is outside the 30-day return window (the deadline was 2026-10-28).
+    key_facts: {order_id: 5110, delivered_on: "2026-09-28", days_since_delivery: 45}
+  evaluators: [answer_correctness]   # usually set once in the file's defaults
+  notes: "Far past the window."
 ```
+The customer is identified by email, which the target looks up with `OrderRepository.find_user_by_email`, so no internal id goes into the dataset and the repository needs no eval-only method.
 
 **Mapping to LangSmith**
 
@@ -66,15 +68,18 @@ evals/datasets/m1/*.yaml ──sync.py──▶ LangSmith dataset "orderpilot-m1
 - **One dataset per milestone** (`orderpilot-m1`, later `orderpilot-m2`). Splits are neutral subsets (`smoke`, `full`). A single family is chosen by metadata filter (`client.list_examples(..., metadata={"scenario_family": "P"})`).
 - **Tied to one DB build.** References hold absolute dates, so a dataset is valid for one database only. The dataset's metadata stores `reference_now`, and `run.py` refuses to run if `repo.reference_now()` differs.
 - **Hand-written references.** Expected outcomes come from the scenario spec, and facts are looked up by hand in the DB. They are never computed by `policy.py`: a policy bug must not leak into its own reference.
-- **Size:** 1–3 cases per scenario, to start with. Later, a helper can suggest DB rows that match a scenario's data condition, with the references still written by hand.
+- **Size:** 1–3 cases per scenario, to start with: 14 cases for P1–P8, L1, L3, L5 and L6, with boundary cases for days 30 and 31. Later, a helper can suggest DB rows that match a scenario's data condition, with the references still written by hand.
+- **Quirks of the current DB build** (`--today 2026-11-12`): the newest order was placed on 2026-10-28 and the last delivery was on 2026-11-04. So every Processing order is already "stuck" (P1 is also a stuck order), and the most recent delivery is 8 days old (P3 uses 8 days instead of 5).
 
 ## 2. Target layer
-`make_target(repo)` builds the agent once per experiment, through `build_agent(repo=..., checkpointer=InMemorySaver())`, and returns `target(inputs) -> outputs`. Each example runs on a new thread (`thread_id = uuid4()`). Milestone 1 is read-only, so examples share one DB. In Milestone 2 the factory gets a fresh DB copy per example, and nothing else changes.
+`AgentTarget(repo)` (`evals/target.py`) builds the agent once per experiment, through `build_agent(repo=..., checkpointer=InMemorySaver())`. LangSmith gets its bound method `invoke(inputs) -> outputs` as the target. Each example runs on a new thread (`thread_id = uuid4()`). Milestone 1 is read-only, so examples share one DB. In Milestone 2 the target gets a fresh DB copy per example, and nothing else changes.
 
 **Seeding a verified customer (single-turn).** The graph compiles with `input_schema=MessagesState`, so `user_id` in the invoke input is dropped. That is on purpose (rule 2), and the evals don't work around it in production code. Instead, `seed_verified_thread(graph, config, user)` writes state directly:
 
 ```python
-graph.update_state(config, {"user_id": user.id, "messages": verified_history(user)}, as_node="agent")
+graph.update_state(
+    config, {"user_id": user.user_id, "messages": verified_history(user)}, as_node="agent"
+)
 graph.invoke({"messages": [HumanMessage(question)]}, config)
 ```
 
@@ -94,28 +99,36 @@ class Evaluator(ABC):
     key: ClassVar[str]
     kind: ClassVar[Literal["gate", "score"]] = "score"
 
-    def __call__(self, run: Run, example: Example) -> list[EvaluationResult]:
+    def __call__(self, run: Run, example: Example | None) -> EvaluationResults:
         """Error policy and applicability, shared by every metric (template method)."""
 
     @abstractmethod
     def evaluate(self, run: Run, example: Example) -> list[EvaluationResult]: ...
 
-class LLMJudgeEvaluator(Evaluator):        # holds the judge and a versioned prompt
+
+class LLMJudgeEvaluator(Evaluator):  # holds the judge and a versioned prompt
     prompt: ClassVar[str]
     prompt_version: ClassVar[str]
+
     def __init__(self, judge: BaseChatModel) -> None: ...
+
 
 class AnswerCorrectnessEvaluator(LLMJudgeEvaluator):
     key = "answer_correctness"
 
+
 class EvaluatorFactory:
-    _REGISTRY: ClassVar[dict[str, type[Evaluator]]] = {"answer_correctness": AnswerCorrectnessEvaluator}
+    _REGISTRY: ClassVar[dict[str, type[Evaluator]]] = {
+        "answer_correctness": AnswerCorrectnessEvaluator
+    }
+
     @classmethod
     def build(cls, names: Sequence[str]) -> list[Evaluator]: ...
 ```
 
-- **Several metrics in one run.** `evaluate(evaluators=[...])` takes the factory's list, and each evaluator writes its own feedback key. An evaluator can also return several results at once (LangSmith accepts a list of results), so one judge call can yield several sub-verdicts.
-- **Signature `(run, example)`.** LangSmith passes the `Run` and the `Example` when the parameters are named exactly that. We need `run.error` for the error policy and `example.metadata` for applicability. A callable object has no `__name__`, so **every result sets `key` explicitly**.
+- **Several metrics in one run.** `client.evaluate(evaluators=[...])` takes the factory's list, and each evaluator writes its own feedback key. An evaluator can also return several results at once, so one judge call can yield several sub-verdicts.
+- **Return shape: `EvaluationResults`, i.e. `{"results": [...]}`.** LangSmith rejects a bare list of `EvaluationResult` objects (it only accepts a list of dicts) and any empty result, but accepts an empty `results` list. That is how "not applicable" emits no feedback. A contract test runs our objects through LangSmith's `run_evaluator` to keep this true.
+- **Signature `(run, example)`.** LangSmith passes the `Run` and the `Example` when the parameters are named exactly that (it types `example` as optional). We need `run.error` for the error policy and `example.metadata` for applicability. LangSmith names evaluators by `__name__`, which objects lack, so the base class sets `self.__name__ = key`, and **every result sets `key` explicitly**.
 - **The judge is built only when needed.** The factory calls `build_judge()` only if a selected evaluator is an `LLMJudgeEvaluator`. Runs with only code-based metrics then work without an OpenAI key.
 - **Own base class, not LangSmith's `RunEvaluator`,** so LangSmith types stay in one adapter and a later move to Langfuse stays cheap.
 
@@ -123,12 +136,12 @@ class EvaluatorFactory:
 
 | Situation | Result |
 |---|---|
-| Metric doesn't apply to this case (not in the case's `evaluators`) | No result emitted, so averages are not diluted |
+| Metric doesn't apply to this case (not in the case's `evaluators`) | An empty `results` list: no feedback, so averages are not diluted |
 | The agent run errored (exception, recursion limit) | The metric scores `False`, with the error as its comment |
 | The evaluator or judge failed (API error, unparsable output) | No score for the metric; an `evaluator_error` result is emitted instead (metric key in its metadata), so "the judge broke" is never counted as "the agent failed" |
 
 ### Step 1 metric: `answer_correctness`
-- **Built on** openevals `create_llm_as_judge(prompt=..., judge=<ChatOpenAI from LLMFactory>, output_schema=...)`. The judge model must support structured output.
+- **Built on** openevals `create_llm_as_judge(prompt=..., judge=<ChatOpenAI from LLMFactory>, output_schema=JudgeVerdict)`. Prompt variables are passed as keyword arguments (`question`, `answer`, `expected_outcome`, `key_facts`). The judge model must support structured output.
 - **Judge sees:** the question, the final answer and the reference (`expected_outcome`, `key_facts`). It does **not** see tool outputs (that is groundedness, a later metric) or any metadata.
 - **Output schema:** `reasoning` (written first), then `verdict: bool`. Pass/fail only, no 1–5 scale: it is easier to calibrate and easier to act on.
 - **Rubric:** the decision matches the expected outcome; the key facts that are stated are correct; nothing contradicts the reference; the reason is explained. Leaving out extra detail is fine; a wrong fact fails the answer.
@@ -137,16 +150,19 @@ class EvaluatorFactory:
 
 ## 4. Orchestration: `run.py`
 ```bash
-uv run python -m evals.run --split smoke --evaluators answer_correctness --description "prompt v2"
+uv run python -m evals.sync --dataset m1 [--prune]       # repo YAML → LangSmith
+uv run python -m evals.run --split smoke --family P --description "prompt v2"
 EVAL_REPEATS=5 uv run python -m evals.run --split full
 ```
-- **Command-line arguments** are only what changes per run: `--split`, `--family`, `--evaluators`, `--description`. Judge settings, k and concurrency come from `eval_settings`.
-- **Calls** `evaluate(target, data=examples, evaluators=EvaluatorFactory.build(...), num_repetitions=k, max_concurrency=..., experiment_prefix=..., metadata=...)`.
-- **Experiment metadata**, which is what makes comparisons meaningful: `agent_provider`, `agent_model`, `judge_provider`, `judge_model`, the prompt version of each judge, `git_sha`, `reference_now`.
-- **Re-grading without re-running the agent:** `evaluate("<experiment id>", evaluators=[...])` scores an existing experiment's stored outputs. Use it after a judge prompt change, or to add a new metric to old runs.
+- **`sync.py`** checks evaluator names and that the YAML's `reference_now` matches the local DB, refuses a remote dataset written for another DB build, then creates new examples and updates existing ones by their stable id. `--prune` deletes remote examples whose case is gone.
+- **Command-line arguments** of `run.py` are only what changes per run: `--dataset`, `--split`, `--family` (repeatable), `--evaluators` (default: the metrics the selected cases list), `--description`. Judge settings, k and concurrency come from `eval_settings`.
+- **Calls** `client.evaluate(AgentTarget(repo).invoke, data=examples, evaluators=EvaluatorFactory.build(...), num_repetitions=k, max_concurrency=..., experiment_prefix=..., metadata=..., error_handling="log")`. Importing `evaluate` from `langsmith.evaluation` is deprecated; `client.evaluate` is the current API.
+- **Experiment metadata**, which is what makes comparisons meaningful: `agent_provider`, `agent_model`, `judge_provider`, `judge_model`, `judge_prompts` (version per judge metric), `git_sha` and `git_dirty`, `reference_now`, `repeats`, `split`, `families`.
+- **Exit codes:** 0 success, 1 a gate metric failed, 2 setup or configuration error.
+- **Re-grading without re-running the agent:** `client.evaluate("<experiment id>", evaluators=[...])` scores an existing experiment's stored outputs. Use it after a judge prompt change, or to add a new metric to old runs.
 
 ## 5. Reporting: `report.py`
-After each run, a local summary is built from the `ExperimentResults` rows (`run`, `example`, `evaluation_results`). Repetitions share an example ID, so they are grouped by it.
+After each run, a local summary is built from the result rows (`run`, `example`, `evaluation_results`) that `client.evaluate` returns. Repetitions share an example ID, so they are grouped by it. Runs where a metric didn't apply, or whose evaluator failed, don't count for that metric.
 
 | Per scenario and metric | Definition |
 |---|---|
@@ -159,7 +175,7 @@ After each run, a local summary is built from the `ExperimentResults` rows (`run
 
 Gate metrics fail the experiment if any run fails a gate.
 
-pass^k is computed locally because LangSmith summary evaluators receive runs and examples, but **not** the per-run feedback. The summary numbers are then attached to the experiment as experiment-level feedback (`client.create_feedback(project_id=<experiment id>, key=..., score=...)`), so they show up in the LangSmith UI too.
+pass^k is computed locally because LangSmith summary evaluators receive runs and examples, but **not** the per-run feedback. The overall numbers are then attached to the experiment as experiment-level feedback (`client.create_feedback(None, "<metric>:pass^k", score=..., project_id=<experiment id>)`, likewise `:pass_rate` and `:pass@k`), so they show up in the LangSmith UI too.
 
 ## 6. Judge calibration
 1. Send the first experiments to a LangSmith **annotation queue** and label 30–50 runs by hand, under the separate key `answer_correctness_human`.
@@ -180,7 +196,6 @@ Eval-only settings live in `evals/settings.py`: `EvalSettings(BaseSettings)` wit
 
 API keys, policy values (`RETURN_WINDOW_DAYS`…) and `DB_PATH` stay in `orderpilot.settings`, so graders and tools always read the same policy. `build_judge()` logs a warning when the judge uses the same provider and model as the agent.
 
-_Pending:_ CLAUDE.md still says `evals/` reads only `settings`. It needs a line allowing `eval_settings` as a singleton.
 
 ## 8. Testing the eval code
 Tests live in `tests/`, use pytest-mock, and never call a real LLM:
@@ -189,29 +204,35 @@ Tests live in `tests/`, use pytest-mock, and never call a real LLM:
 - **`Evaluator.__call__`:** not-applicable emits nothing; an errored run scores `False`; a judge failure emits `evaluator_error`; keys are always set.
 - **`AnswerCorrectnessEvaluator`:** the judge is mocked; checks the mapping from judge output to result.
 - **Report maths:** pass rate, pass^k, pass@k and flaky detection on hand-built rows.
+- **LangSmith contract:** our evaluator objects run through LangSmith's `run_evaluator`, including the empty not-applicable result.
+- **Sync and run:** LangSmith `Client` mocked with autospec: create vs update by stable id, pruning, DB-build refusals, `evaluate()` arguments and metadata.
+- **The committed dataset:** `evals/datasets/m1` loads and every scenario has a smoke case.
 
 ## 9. Layout
 ```
 evals/
 ├── settings.py              # EvalSettings / eval_settings
+├── errors.py                # EvalError, EvalSetupError
+├── client.py                # make_client(): LangSmith client from settings
 ├── judge.py                 # build_judge() via LLMFactory
-├── cases.py                 # EvalCase model + YAML loader
-├── datasets/m1/{P,L}.yaml   # hand-written cases
+├── cases.py                 # EvalCase model, YAML loader, DB-build check
+├── datasets/m1/             # dataset.yaml, P.yaml, L.yaml: hand-written cases
 ├── sync.py                  # repo → LangSmith upsert
-├── target.py                # make_target(repo), seed_verified_thread, verified_history
+├── target.py                # AgentTarget, seed_verified_thread, verified_history
 ├── prompts.py               # versioned judge prompts
 ├── evaluators/              # base.py (Evaluator, LLMJudgeEvaluator), factory.py, answer_correctness.py
-├── run.py                   # evaluate() entrypoint
-├── report.py                # pass rate, pass^k, flaky, cost; attaches experiment feedback
-└── calibrate.py             # judge vs human agreement
+├── run.py                   # client.evaluate() entrypoint
+├── report.py                # pass rate, pass^k, flaky, latency; attaches experiment feedback
+└── calibrate.py             # (step 1b, not yet) judge vs human agreement
 ```
-**Dependencies:** a new `evals` dependency group with `langsmith`, `openevals` and `pyyaml`. These are declared explicitly even where they arrive indirectly today. `agentevals` is added in step 2.
+**Dependencies:** the `evals` dependency group (`langsmith`, `openevals`, `pyyaml`, `types-PyYAML`), installed by default. These are declared explicitly even where they arrive indirectly. Step 2 needs no new dependency: trajectory match is in `openevals.trajectory`.
 
 ## 10. Roadmap
 | Step | Adds |
 |---|---|
-| **1** | Pipeline end to end, `answer_correctness`, report, calibration (P plus L1, L3, L5, L6) |
-| 2 | Trajectory: expected tool calls and `reason_code` (code), agentevals trajectory match |
+| **1** | Pipeline end to end, `answer_correctness`, report (P plus L1, L3, L5, L6). Done |
+| 1b | Judge calibration: annotation queue, `calibrate.py`, judge dataset |
+| 2 | Trajectory: expected tool calls and `reason_code` (code), openevals trajectory match |
 | 3 | Gates and behaviour: leak scan (`kind="gate"`), clarification and refusal rubrics (AM, L2, S), AU with unverified starts |
 | 4 | Groundedness: claims in the answer against tool outputs in the trajectory |
 | 5 | Multi-turn: openevals simulated user (AU3, AM1 follow-ups) |
@@ -220,9 +241,9 @@ evals/
 
 ## Checked API facts (2026-11-16)
 - **langsmith 0.14.17:**
-  - `evaluate()` takes `num_repetitions`, `max_concurrency`, `metadata` and `error_handling`; `target` can be an existing experiment ID (re-grading).
+  - `client.evaluate()` takes `num_repetitions`, `max_concurrency`, `metadata` and (through `**kwargs`) `error_handling`; `target` can be an existing experiment ID (re-grading). Importing from `langsmith.evaluation` is deprecated.
   - Evaluator parameter names it supports: `run`, `example`, `inputs`, `outputs`, `reference_outputs`, `attachments`.
-  - A list of results is accepted.
+  - Several results: `{"results": [...]}` or a list of *dicts*; a list of `EvaluationResult` objects and an empty result are rejected.
   - Repetitions repeat the same example ID.
   - Summary evaluators get `(runs, examples)` without feedback.
   - `list_examples` filters by `splits` and `metadata`.
@@ -234,11 +255,10 @@ evals/
 - **openevals 0.2.5 (2026-11-12):**
   - `create_llm_as_judge` takes `judge=` (a LangChain chat model with structured output), `feedback_key`, `choices`, `continuous`, `use_reasoning`, `few_shot_examples`, `output_schema` and `system`.
   - With `output_schema`, the return value has the schema's shape instead of `{key, score, comment}`.
-  - Its behaviour on LLM errors is undocumented, hence our own error policy.
-- **agentevals 0.0.9 (2025-07-24):**
-  - The trajectory match modes are `strict`, `unordered`, `subset` and `superset`, plus `tool_args_match_mode`.
-  - It accepts OpenAI-format dicts or LangChain messages.
-  - **Risk:** no release in 16 months. It is wrapped behind our `Evaluator`, so it can be replaced by our own trajectory matcher if needed.
+  - Extra keyword arguments fill the prompt template (`prompt.format(**kwargs)`).
+  - LLM errors are not caught, hence our own error policy.
+  - It also ships the trajectory matchers and trajectory judge (`openevals.trajectory`).
+- **agentevals 0.0.9 (2025-07-24):** no release in 16 months, and its trajectory matchers are now in openevals, so it is not used.
 
 ## Open questions
 - k and concurrency defaults, once the cost per run is known.

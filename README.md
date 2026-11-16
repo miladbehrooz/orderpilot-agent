@@ -33,3 +33,23 @@ Tests never trace.
 
 The graph's input accepts only `messages`. Other keys sent by a client (for example `user_id`)
 are dropped, so a customer can only be identified through `verify_customer`.
+
+## Evaluation
+
+The agent is evaluated with LangSmith experiments; the design is in
+[docs/evals.md](docs/evals.md). Hand-written cases live in `evals/datasets/` (the source of
+truth) and are graded by evaluator classes in `evals/evaluators/`. The first metric,
+`answer_correctness`, is an LLM judge (OpenAI) that checks each answer against a hand-written
+reference.
+
+1. In `.env`, set `LANGSMITH_API_KEY`, `OPENAI_API_KEY` and `EVAL_JUDGE_MODEL` (see `sample.env`).
+2. Copy the cases to LangSmith, then run an experiment:
+   ```bash
+   uv run python -m evals.sync --dataset m1
+   EVAL_REPEATS=1 uv run python -m evals.run --split smoke    # quick check
+   uv run python -m evals.run --split full                    # k = EVAL_REPEATS (default 3)
+   ```
+Each case runs as a single question from an already-verified customer, k times. The report
+prints pass rate, pass^k (every run passes) and pass@k (at least one passes) per scenario, and
+attaches the overall numbers to the experiment in LangSmith. The dataset is tied to the
+database build: `sync` and `run` refuse to run if `reference_now` differs.

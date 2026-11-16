@@ -15,7 +15,7 @@ If code and docs disagree, ask before changing either.
 - Python 3.11+, LangChain + LangGraph, SQLite (stdlib `sqlite3`)
 - LangChain/LangGraph APIs change often: check the current docs before using an API, don't rely on memory.
 - Keep dependencies minimal.
-- Evals: LangSmith runs them (datasets, experiments); metrics are our own evaluator classes, using openevals (LLM-as-judge) and agentevals (trajectory match) for the generic parts. Judge model on OpenAI via `LLMFactory`. See `docs/evals.md`.
+- Evals: LangSmith runs them (datasets, experiments); metrics are our own evaluator classes, using openevals for the generic parts (LLM-as-judge; trajectory match in `openevals.trajectory`). Judge model on OpenAI via `LLMFactory`. See `docs/evals.md`.
 
 ## Non-negotiable design rules
 1. **Business rules and date maths live in tool code**, never only in prompts. Tools return a decision, a `reason_code` and the supporting numbers; the LLM only explains them.
@@ -74,6 +74,8 @@ uv run mypy                               # type check (strict)
 uv run pytest                             # tests
 uv run langgraph dev                      # local agent server + Studio (see README)
 uv run python -m orderpilot               # terminal chat with the agent
+uv run python -m evals.sync --dataset m1  # eval cases (evals/datasets/m1) -> LangSmith dataset
+uv run python -m evals.run --split smoke  # run an eval experiment (EVAL_REPEATS=k runs per case)
 ```
 
 ## Coding style

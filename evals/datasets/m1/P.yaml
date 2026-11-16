@@ -1,0 +1,172 @@
+# P: policy eligibility (answer only, no action). Scenarios P1-P8 in docs/scenarios.md.
+defaults:
+  splits: [full]
+  evaluators: [answer_correctness]
+
+cases:
+  - case_id: P1-01
+    scenario_id: P1
+    splits: [full, smoke]
+    inputs:
+      customer_email: annecurtis@example.net
+      question: "Can I still cancel order 97953?"
+    reference:
+      expected_outcome: >-
+        Yes, order 97953 can be cancelled because it is still Processing (placed on
+        2026-10-28). It has been processing for 15 days, so mentioning that it looks stuck
+        is fine but not required.
+      key_facts:
+        order_id: 97953
+        status: Processing
+        created_on: "2026-10-28"
+    notes: "Every Processing order in this DB build is older than 7 days, so P1 is also stuck."
+
+  - case_id: P2-01
+    scenario_id: P2
+    splits: [full, smoke]
+    inputs:
+      customer_email: glendaparks@example.com
+      question: "I'd like to cancel order 6738, is that possible?"
+    reference:
+      expected_outcome: >-
+        No, order 6738 can't be cancelled because it has already shipped (on 2026-10-31).
+        Once it is delivered it can be returned instead.
+      key_facts:
+        order_id: 6738
+        status: Shipped
+        shipped_on: "2026-10-31"
+    notes: "Shipped 12 days ago, so not yet 'possibly lost' (more than 14 days)."
+
+  - case_id: P3-01
+    scenario_id: P3
+    splits: [full, smoke]
+    inputs:
+      customer_email: donaldmeadows@example.net
+      question: "Can I return order 87511?"
+    reference:
+      expected_outcome: >-
+        Yes, order 87511 can be returned. It was delivered on 2026-11-04 (8 days ago), within
+        the 30-day window; the refund is 19.99 and the return deadline is 2026-12-04.
+      key_facts:
+        order_id: 87511
+        delivered_on: "2026-11-04"
+        days_since_delivery: 8
+        refund_total: 19.99
+        return_deadline: "2026-12-04"
+    notes: "Most recent deliveries in this DB build are 8 days old."
+
+  - case_id: P3-02
+    scenario_id: P3
+    inputs:
+      customer_email: shanemathews@example.org
+      question: "Is it too late to return order 13959?"
+    reference:
+      expected_outcome: >-
+        No, it is not too late: order 13959 was delivered on 2026-10-13, exactly 30 days ago,
+        and day 30 is still inside the window. Both items can be returned for a refund of
+        276.00; today (2026-11-12) is the last day.
+      key_facts:
+        order_id: 13959
+        delivered_on: "2026-10-13"
+        days_since_delivery: 30
+        refund_total: 276.00
+        return_deadline: "2026-11-12"
+    notes: "Boundary: day 30 is eligible."
+
+  - case_id: P4-01
+    scenario_id: P4
+    splits: [full, smoke]
+    inputs:
+      customer_email: christinafranklin@example.com
+      question: "Can I return order 5110?"
+    reference:
+      expected_outcome: >-
+        No, order 5110 can't be returned. It was delivered on 2026-09-28, 45 days ago, which
+        is outside the 30-day return window (the deadline was 2026-10-28).
+      key_facts:
+        order_id: 5110
+        delivered_on: "2026-09-28"
+        days_since_delivery: 45
+        return_deadline: "2026-10-28"
+    notes: "Far past the window."
+
+  - case_id: P4-02
+    scenario_id: P4
+    inputs:
+      customer_email: charlesvelazquez@example.com
+      question: "Can I still send back order 4481?"
+    reference:
+      expected_outcome: >-
+        No, order 4481 can't be returned any more. It was delivered on 2026-10-12, 31 days
+        ago, one day past the 30-day window (the deadline was 2026-11-11).
+      key_facts:
+        order_id: 4481
+        delivered_on: "2026-10-12"
+        days_since_delivery: 31
+        return_deadline: "2026-11-11"
+    notes: "Boundary: day 31 is not eligible."
+
+  - case_id: P5-01
+    scenario_id: P5
+    splits: [full, smoke]
+    inputs:
+      customer_email: carmendouglas@example.org
+      question: "Can I return order 73008?"
+    reference:
+      expected_outcome: >-
+        Not yet: order 73008 has shipped (on 2026-10-31) but has not been delivered, so it
+        can't be returned yet. It can be returned within 30 days after delivery.
+      key_facts:
+        order_id: 73008
+        status: Shipped
+        shipped_on: "2026-10-31"
+
+  - case_id: P6-01
+    scenario_id: P6
+    splits: [full, smoke]
+    inputs:
+      customer_email: keith.williams05@example.org
+      question: "I want to return order 116."
+    reference:
+      expected_outcome: >-
+        Order 116 can't be returned because it was cancelled, so there is nothing to return.
+      key_facts:
+        order_id: 116
+        status: Cancelled
+
+  - case_id: P7-01
+    scenario_id: P7
+    splits: [full, smoke]
+    inputs:
+      customer_email: krystaljennings@example.com
+      question: "Can I return order 1233?"
+    reference:
+      expected_outcome: >-
+        No, order 1233 has already been returned (on 2026-10-29), so there is nothing left to
+        return.
+      key_facts:
+        order_id: 1233
+        status: Returned
+        returned_on: "2026-10-29"
+
+  - case_id: P8-01
+    scenario_id: P8
+    splits: [full, smoke]
+    inputs:
+      customer_email: kathrynhickman@example.com
+      question: "Can I return just the jeans from order 2670?"
+    reference:
+      expected_outcome: >-
+        Yes, the jeans (Levi's Juniors Ankle Skinny Jean) from order 2670 can be returned on
+        their own, for a refund of 29.99. The order was delivered on 2026-11-01 (11 days
+        ago); the deadline is 2026-12-01. The other item (the James Jeans shorts) is not
+        part of this return.
+      key_facts:
+        order_id: 2670
+        item: "Levi's Juniors Ankle Skinny Jean"
+        category: Jeans
+        refund_amount: 29.99
+        delivered_on: "2026-11-01"
+        days_since_delivery: 11
+        return_deadline: "2026-12-01"
+    notes: "The other item is a James Jeans brand short (category Shorts): 'jeans' is a trap."

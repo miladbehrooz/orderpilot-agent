@@ -29,9 +29,16 @@ data = [
     "pandas>=2.2",
     "pandas-stubs>=2.2",
 ]
+# Used only by the eval harness in evals/ (outside the package); see docs/evals.md.
+evals = [
+    "langsmith>=0.14.17",
+    "openevals>=0.2.5",
+    "pyyaml>=6.0",
+    "types-PyYAML>=6.0",
+]
 
 [tool.uv]
-default-groups = ["dev", "data"]
+default-groups = ["dev", "data", "evals"]
 
 [build-system]
 requires = ["hatchling"]
@@ -71,6 +78,10 @@ ignore = [
     "D105", # magic methods (__repr__ etc.): optional
     "D107", # __init__: document args in the class docstring instead
 ]
+
+[tool.ruff.lint.isort]
+# evals/ is a top-level package next to src/, not an installed one.
+known-first-party = ["orderpilot", "evals"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"

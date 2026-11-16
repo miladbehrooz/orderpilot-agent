@@ -1,0 +1,5 @@
+# Milestone 1 eval dataset (single-turn, seeded verified customer). See docs/evals.md.
+# References are hand-written from the raw rows of this DB build and must not be derived
+# from src/orderpilot/policy.py. Day counts are calendar days up to reference_now.
+description: "OrderPilot Milestone 1: single-turn questions from an already-verified customer"
+reference_now: "2026-11-12T00:00:00+00:00"
