@@ -172,7 +172,7 @@ After each run, a local summary is built from the result rows (`run`, `example`,
 | pass@k | Cases where at least one run passes / cases |
 | flaky | Cases with 0 < pass rate < 1, listed by `case_id` |
 | evaluator errors | Count of `evaluator_error` results |
-| latency, tokens, cost | p50/p95 per run, from the runs |
+| latency | p50/p95 per run, from the runs' start and end times |
 
 Gate metrics fail the experiment if any run fails a gate.
 

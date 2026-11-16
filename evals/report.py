@@ -51,7 +51,6 @@ class ScoredRun:
             failed are absent.
         evaluator_errors: Number of ``evaluator_error`` results on this run.
         latency_s: Wall-clock duration of the run, if known.
-        total_tokens: Tokens used by the run, if known.
     """
 
     example_id: str
@@ -60,7 +59,6 @@ class ScoredRun:
     scores: Mapping[str, bool]
     evaluator_errors: int = 0
     latency_s: float | None = None
-    total_tokens: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,7 +98,6 @@ class Report:
         evaluator_errors: Total ``evaluator_error`` results.
         latency_p50_s: Median run latency, if known.
         latency_p95_s: 95th-percentile run latency, if known.
-        mean_tokens: Mean tokens per run, if known.
         failed_gates: Gate metrics with at least one failing run.
     """
 
@@ -108,7 +105,6 @@ class Report:
     evaluator_errors: int
     latency_p50_s: float | None
     latency_p95_s: float | None
-    mean_tokens: float | None
     failed_gates: tuple[str, ...]
 
     @property
@@ -167,7 +163,6 @@ def scored_runs(rows: Iterable[ResultRow]) -> list[ScoredRun]:
                 scores=scores,
                 evaluator_errors=sum(r.key == "evaluator_error" for r in results),
                 latency_s=latency,
-                total_tokens=run.total_tokens,
             )
         )
     return runs
@@ -245,7 +240,6 @@ def summarize(runs: Sequence[ScoredRun], kinds: Mapping[str, EvaluatorKind]) -> 
         summaries.append(_summarize_metric(MetricSummary.OVERALL, metric, scored))
 
     latencies = [run.latency_s for run in runs if run.latency_s is not None]
-    tokens = [run.total_tokens for run in runs if run.total_tokens is not None]
     failed_gates = tuple(
         s.metric
         for s in summaries
@@ -258,7 +252,6 @@ def summarize(runs: Sequence[ScoredRun], kinds: Mapping[str, EvaluatorKind]) -> 
         evaluator_errors=sum(run.evaluator_errors for run in runs),
         latency_p50_s=_percentile(latencies, 50),
         latency_p95_s=_percentile(latencies, 95),
-        mean_tokens=sum(tokens) / len(tokens) if tokens else None,
         failed_gates=failed_gates,
     )
 
@@ -294,11 +287,10 @@ def format_report(report: Report) -> str:
         """
         return "n/a" if value is None else f"{value:.1f}s"
 
-    tokens = "n/a" if report.mean_tokens is None else f"{report.mean_tokens:.0f}"
     lines += [
         "",
         f"latency p50 {_seconds(report.latency_p50_s)}, p95 {_seconds(report.latency_p95_s)}; "
-        f"mean tokens {tokens}; evaluator errors {report.evaluator_errors}",
+        f"evaluator errors {report.evaluator_errors}",
     ]
     if report.gate_failed:
         lines.append(f"FAILED GATES: {', '.join(report.failed_gates)}")

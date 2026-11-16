@@ -111,15 +111,11 @@ def test_gate_failure_fails_report() -> None:
     assert "FAILED GATES: no_data_leak" in format_report(report)
 
 
-def test_latency_percentiles_and_tokens() -> None:
-    """Latency percentiles use nearest rank; tokens are averaged over runs that report them."""
-    runs = [
-        ScoredRun(str(i), "P3-01", "P3", {"m": True}, latency_s=float(i), total_tokens=100)
-        for i in range(1, 11)
-    ]
+def test_latency_percentiles_use_nearest_rank() -> None:
+    """Latency percentiles use nearest rank over the runs that report a latency."""
+    runs = [ScoredRun(str(i), "P3-01", "P3", {"m": True}, latency_s=float(i)) for i in range(1, 11)]
     report = summarize(runs, kinds={})
     assert (report.latency_p50_s, report.latency_p95_s) == (5.0, 10.0)
-    assert report.mean_tokens == 100
 
 
 def test_scored_runs_reads_langsmith_rows() -> None:
