@@ -46,7 +46,7 @@ def dataset_path(tmp_path: Path) -> Path:
         """\
         defaults:
           splits: [full]
-          evaluators: [answer_correctness]
+          metrics: [answer_correctness]
         cases:
           - case_id: P4-01
             scenario_id: P4
@@ -72,7 +72,7 @@ def test_load_dataset_merges_file_defaults(dataset_path: Path) -> None:
     by_id = {case.case_id: case for case in dataset.cases}
     assert by_id["P4-01"].splits == ["full", "smoke"]
     assert by_id["AU3-01"].splits == ["full"]
-    assert by_id["AU3-01"].evaluators == ["answer_correctness"]
+    assert by_id["AU3-01"].metrics == ["answer_correctness"]
     assert dataset.name == "m9"
     assert dataset.langsmith_name == "orderpilot-m9"
     assert dataset.reference_now.isoformat() == "2026-11-12T00:00:00+00:00"
@@ -119,7 +119,7 @@ def test_to_example_keeps_bookkeeping_out_of_inputs(dataset_path: Path) -> None:
     assert example.metadata is not None
     assert example.metadata["scenario_id"] == "P4"
     assert example.metadata["scenario_family"] == "P"
-    assert example.metadata["evaluators"] == ["answer_correctness"]
+    assert example.metadata["metrics"] == ["answer_correctness"]
     assert example.split == ["full", "smoke"]
     assert example.id == case.example_id
 
@@ -138,7 +138,7 @@ def test_load_dataset_rejects_duplicate_case_id(dataset_path: Path) -> None:
           - case_id: P4-01
             scenario_id: P4
             splits: [full]
-            evaluators: [answer_correctness]
+            metrics: [answer_correctness]
             inputs: {customer_email: c@example.com, question: "?"}
             reference: {expected_outcome: "x"}
         """,
@@ -161,7 +161,7 @@ def test_load_dataset_reports_schema_error_with_case_id(dataset_path: Path) -> N
           - case_id: S1-01
             scenario_id: S1
             splits: [nightly]
-            evaluators: [answer_correctness]
+            metrics: [answer_correctness]
             inputs: {customer_email: d@example.com, question: "?"}
             reference: {expected_outcome: "x"}
         """,
@@ -188,7 +188,7 @@ def test_case_rejects_unknown_field() -> None:
                 "case_id": "P1-01",
                 "scenario": "P1",
                 "splits": ["full"],
-                "evaluators": ["answer_correctness"],
+                "metrics": ["answer_correctness"],
                 "inputs": {"customer_email": "e@example.com", "question": "?"},
                 "reference": {"expected_outcome": "x"},
             }

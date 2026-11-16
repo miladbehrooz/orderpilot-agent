@@ -8,7 +8,8 @@ _2026-11-16. Derived from `scenarios.md` and `tools.md`. Step 1 (sections 1–5,
 3. **Gates are separate from scores.** A safety gate (e.g. no data leak) fails the run whatever the averages say. Quality scores are averaged.
 4. **Agents are non-deterministic.** Every case runs k times. We report the per-run pass rate, **pass^k** (all k runs pass: reliability) and pass@k (at least one passes: capability).
 5. **A judge is trusted only after calibration.** Judge verdicts are checked against human labels before they gate anything, and the judge has its own regression dataset.
-6. **The agent knows nothing about its evals.** `evals/` sits outside the package (like `tests/`) and only imports from `orderpilot`. Production code has no eval-only hooks.
+6. **Terminology: a *metric* is what is measured, an *evaluator* is the code that measures it.** A metric (`answer_correctness`) is a feedback key, a report column and the name listed in case files and on the command line (`metrics:`, `--metrics`). An evaluator (`AnswerCorrectnessEvaluator`) is the class that computes one metric for one run; "evaluator" is LangSmith's and openevals' term for it.
+7. **The agent knows nothing about its evals.** `evals/` sits outside the package (like `tests/`) and only imports from `orderpilot`. Production code has no eval-only hooks.
 
 ## Tooling decisions
 | Concern | Choice | Why |
@@ -51,7 +52,7 @@ evals/datasets/m1/*.yaml ──sync.py──▶ LangSmith dataset "orderpilot-m1
       No, order 5110 can't be returned. It was delivered on 2026-09-28, 45 days ago, which
       is outside the 30-day return window (the deadline was 2026-10-28).
     key_facts: {order_id: 5110, delivered_on: "2026-09-28", days_since_delivery: 45}
-  evaluators: [answer_correctness]   # usually set once in the file's defaults
+  metrics: [answer_correctness]      # usually set once in the file's defaults
   notes: "Far past the window."
 ```
 The customer is identified by email, which the target looks up with `OrderRepository.find_user_by_email`, so no internal id goes into the dataset and the repository needs no eval-only method.
@@ -62,7 +63,7 @@ The customer is identified by email, which the target looks up with `OrderReposi
 |---|---|---|
 | `inputs` | example `inputs` | Target (agent), evaluators |
 | `reference` | example `outputs` (reference outputs) | Evaluators only |
-| `case_id`, `scenario_id`, family, `evaluators`, `notes` | example `metadata` | Report and UI filters; **never** the agent or the judge |
+| `case_id`, `scenario_id`, family, `metrics`, `notes` | example `metadata` | Report and UI filters; **never** the agent or the judge |
 | `splits` | example splits | Run selection |
 
 - **One dataset per milestone** (`orderpilot-m1`, later `orderpilot-m2`). Splits are neutral subsets (`smoke`, `full`). A single family is chosen by metadata filter (`client.list_examples(..., metadata={"scenario_family": "P"})`).
@@ -87,7 +88,7 @@ graph.invoke({"messages": [HumanMessage(question)]}, config)
 - `as_node="agent"` is required. Checked against langgraph 1.2.22: `update_state` on a fresh thread *without* `as_node` goes through the input schema and drops `user_id`. With `as_node="agent"`, the last message has no tool calls, so the thread ends (`next == ()`), and the next `invoke` starts from START with `user_id` set.
 - AU scenarios don't use seeding. They start unverified, with scripted history.
 
-**Outputs:** `{"answer": <final AI text>, "messages": convert_to_openai_messages(<full trajectory>)}`. The trajectory is returned from step 1 on, so trajectory evaluators can be added later without changing the target. agentevals accepts OpenAI-format message dicts.
+**Outputs:** `{"answer": <final AI text>, "messages": convert_to_openai_messages(<full trajectory>)}`. The trajectory is returned from step 1 on, so trajectory evaluators can be added later without changing the target. openevals' trajectory matchers accept OpenAI-format message dicts.
 
 **Errors:** `evaluate(..., error_handling="log")` keeps errored runs in the experiment. Evaluators score them as failures (see the error policy below), so a crash never drops out of the denominator.
 
@@ -136,7 +137,7 @@ class EvaluatorFactory:
 
 | Situation | Result |
 |---|---|
-| Metric doesn't apply to this case (not in the case's `evaluators`) | An empty `results` list: no feedback, so averages are not diluted |
+| Metric doesn't apply to this case (not in the case's `metrics`) | An empty `results` list: no feedback, so averages are not diluted |
 | The agent run errored (exception, recursion limit) | The metric scores `False`, with the error as its comment |
 | The evaluator or judge failed (API error, unparsable output) | No score for the metric; an `evaluator_error` result is emitted instead (metric key in its metadata), so "the judge broke" is never counted as "the agent failed" |
 
@@ -154,8 +155,8 @@ uv run python -m evals.sync --dataset m1 [--prune]       # repo YAML → LangSmi
 uv run python -m evals.run --split smoke --family P --description "prompt v2"
 EVAL_REPEATS=5 uv run python -m evals.run --split full
 ```
-- **`sync.py`** checks evaluator names and that the YAML's `reference_now` matches the local DB, refuses a remote dataset written for another DB build, then creates new examples and updates existing ones by their stable id. `--prune` deletes remote examples whose case is gone.
-- **Command-line arguments** of `run.py` are only what changes per run: `--dataset`, `--split`, `--family` (repeatable), `--evaluators` (default: the metrics the selected cases list), `--description`. Judge settings, k and concurrency come from `eval_settings`.
+- **`sync.py`** checks that every metric a case names has a registered evaluator and that the YAML's `reference_now` matches the local DB, refuses a remote dataset written for another DB build, then creates new examples and updates existing ones by their stable id. `--prune` deletes remote examples whose case is gone.
+- **Command-line arguments** of `run.py` are only what changes per run: `--dataset`, `--split`, `--family` (repeatable), `--metrics` (default: the metrics the selected cases list), `--description`. Judge settings, k and concurrency come from `eval_settings`.
 - **Calls** `client.evaluate(AgentTarget(repo).invoke, data=examples, evaluators=EvaluatorFactory.build(...), num_repetitions=k, max_concurrency=..., experiment_prefix=..., metadata=..., error_handling="log")`. Importing `evaluate` from `langsmith.evaluation` is deprecated; `client.evaluate` is the current API.
 - **Experiment metadata**, which is what makes comparisons meaningful: `agent_provider`, `agent_model`, `judge_provider`, `judge_model`, `judge_prompts` (version per judge metric), `git_sha` and `git_dirty`, `reference_now`, `repeats`, `split`, `families`.
 - **Exit codes:** 0 success, 1 a gate metric failed, 2 setup or configuration error.

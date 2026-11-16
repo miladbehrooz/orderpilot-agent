@@ -40,7 +40,7 @@ class CaseInputs(BaseModel):
 
 
 class Reference(BaseModel):
-    """The hand-written expected result, seen only by evaluators.
+    """The hand-written expected result, seen only by the evaluators.
 
     Attributes:
         expected_outcome: The correct answer in one or two sentences.
@@ -60,7 +60,7 @@ class EvalCase(BaseModel):
         case_id: Stable id such as ``P4-01``; the LangSmith example id is derived from it.
         scenario_id: Scenario from ``docs/scenarios.md`` such as ``P4``.
         splits: Dataset splits the case belongs to.
-        evaluators: Keys of the metrics that apply to this case.
+        metrics: Names of the metrics that apply to this case.
         inputs: What the target receives.
         reference: What evaluators compare against.
         notes: Why the case exists, for reviewers.
@@ -71,7 +71,7 @@ class EvalCase(BaseModel):
     case_id: str = Field(pattern=r"^[A-Z]+\d+-\d{2}$")
     scenario_id: str = Field(pattern=r"^[A-Z]+\d+$")
     splits: list[Split] = Field(min_length=1)
-    evaluators: list[str] = Field(min_length=1)
+    metrics: list[str] = Field(min_length=1)
     inputs: CaseInputs
     reference: Reference
     notes: str | None = None
@@ -115,7 +115,7 @@ class EvalCase(BaseModel):
                     "case_id": self.case_id,
                     "scenario_id": self.scenario_id,
                     "scenario_family": self.family,
-                    "evaluators": list(self.evaluators),
+                    "metrics": list(self.metrics),
                     "notes": self.notes,
                 },
             }

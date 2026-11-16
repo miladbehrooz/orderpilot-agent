@@ -1,7 +1,7 @@
-"""Evaluator factory: builds evaluator objects by key from a registry, like ``LLMFactory``.
+"""Evaluator factory: builds the evaluator of each metric from a registry, like ``LLMFactory``.
 
-To add a metric, write an :class:`~evals.evaluators.base.Evaluator` subclass and register
-it in ``_REGISTRY``.
+To add a metric, write an :class:`~evals.evaluators.base.Evaluator` subclass whose ``key`` is
+the metric's name, and register it in ``_REGISTRY``.
 """
 
 from collections.abc import Sequence
@@ -14,58 +14,58 @@ from evals.judge import build_judge
 
 
 class EvaluatorFactory:
-    """Creates evaluators by key; the LLM judge is built only if a selected metric needs it."""
+    """Creates the evaluators of the given metrics; the judge is built only if one needs it."""
 
     _REGISTRY: ClassVar[dict[str, type[Evaluator]]] = {
         AnswerCorrectnessEvaluator.key: AnswerCorrectnessEvaluator,
     }
 
     @classmethod
-    def names(cls) -> list[str]:
-        """Return the registered metric keys.
+    def metric_names(cls) -> list[str]:
+        """Return the metrics that have a registered evaluator.
 
         Returns:
-            Keys in registration order.
+            Metric names in registration order.
         """
         return list(cls._REGISTRY)
 
     @classmethod
     def _lookup(cls, name: str) -> type[Evaluator]:
-        """Return the evaluator class registered under a key.
+        """Return the evaluator class of a metric.
 
         Args:
-            name: Metric key.
+            name: Metric name.
 
         Returns:
             The evaluator class.
 
         Raises:
-            EvalSetupError: If no evaluator is registered under ``name``.
+            EvalSetupError: If no evaluator is registered for ``name``.
         """
         evaluator_cls = cls._REGISTRY.get(name)
         if evaluator_cls is None:
             valid = ", ".join(cls._REGISTRY)
-            raise EvalSetupError(f"Unknown evaluator {name!r}. Valid: {valid}")
+            raise EvalSetupError(f"Unknown metric {name!r}. Valid: {valid}")
         return evaluator_cls
 
     @classmethod
-    def build(cls, names: Sequence[str]) -> list[Evaluator]:
-        """Build the evaluators for the given keys.
+    def build(cls, metrics: Sequence[str]) -> list[Evaluator]:
+        """Build the evaluator of each given metric.
 
         One judge model is built and shared, and only when a selected metric is an LLM
         judge, so code-only runs need no judge configuration or API key.
 
         Args:
-            names: Metric keys, in the order the evaluators should run.
+            metrics: Metric names, in the order the evaluators should run.
 
         Returns:
-            One evaluator per key.
+            One evaluator per metric.
 
         Raises:
-            EvalSetupError: If a key is unknown.
+            EvalSetupError: If a metric is unknown.
             LLMConfigError: If a judge metric is selected but the judge isn't configured.
         """
-        classes = [cls._lookup(name) for name in names]
+        classes = [cls._lookup(name) for name in metrics]
         needs_judge = any(issubclass(c, LLMJudgeEvaluator) for c in classes)
         judge = build_judge() if needs_judge else None
         evaluators: list[Evaluator] = []
@@ -77,20 +77,20 @@ class EvaluatorFactory:
         return evaluators
 
     @classmethod
-    def prompt_versions(cls, names: Sequence[str]) -> dict[str, str]:
+    def prompt_versions(cls, metrics: Sequence[str]) -> dict[str, str]:
         """Return the judge prompt version of each selected judge metric.
 
         Args:
-            names: Metric keys.
+            metrics: Metric names.
 
         Returns:
-            ``{key: prompt_version}`` for the LLM-judge metrics among ``names``.
+            ``{metric: prompt_version}`` for the LLM-judge metrics among ``metrics``.
 
         Raises:
-            EvalSetupError: If a key is unknown.
+            EvalSetupError: If a metric is unknown.
         """
         versions: dict[str, str] = {}
-        for name in names:
+        for name in metrics:
             evaluator_cls = cls._lookup(name)
             if issubclass(evaluator_cls, LLMJudgeEvaluator):
                 versions[name] = evaluator_cls.prompt_version

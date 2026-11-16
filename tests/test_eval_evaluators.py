@@ -68,14 +68,14 @@ def make_example() -> ExampleFactory:
     """Return a builder of dataset examples.
 
     Returns:
-        ``make_example(evaluators=...)`` building a real LangSmith ``Example``.
+        ``make_example(metrics=...)`` building a real LangSmith ``Example``.
     """
 
-    def _make(evaluators: list[str] | None = None) -> Example:
+    def _make(metrics: list[str] | None = None) -> Example:
         """Build an example for a P3-style case.
 
         Args:
-            evaluators: Metrics listed in the example metadata.
+            metrics: Metrics listed in the example metadata.
 
         Returns:
             The example.
@@ -91,7 +91,7 @@ def make_example() -> ExampleFactory:
                 "metadata": {
                     "case_id": "P3-01",
                     "scenario_id": "P3",
-                    "evaluators": ["answer_correctness"] if evaluators is None else evaluators,
+                    "metrics": ["answer_correctness"] if metrics is None else metrics,
                 },
             }
         )
@@ -156,7 +156,7 @@ def test_evaluator_skips_case_without_metric(
         make_run: Run builder.
         make_example: Example builder.
     """
-    output = evaluator(make_run(), make_example(evaluators=["trajectory_match"]))
+    output = evaluator(make_run(), make_example(metrics=["trajectory_match"]))
     assert _results(output) == []
     judge_fn.assert_not_called()
 
@@ -285,7 +285,7 @@ def test_langsmith_accepts_not_applicable_result(
         make_run: Run builder.
         make_example: Example builder.
     """
-    output = run_evaluator(evaluator).evaluate_run(make_run(), make_example(evaluators=[]))
+    output = run_evaluator(evaluator).evaluate_run(make_run(), make_example(metrics=[]))
     assert _results(output) == []
 
 
@@ -308,8 +308,8 @@ def test_factory_builds_judge_only_when_needed(mocker: MockerFixture, judge_fn: 
     build_judge.assert_called_once_with()
 
 
-def test_factory_rejects_unknown_evaluator() -> None:
-    """An unknown metric key fails with the list of valid keys."""
+def test_factory_rejects_unknown_metric() -> None:
+    """An unknown metric name fails with the list of valid metric names."""
     with pytest.raises(EvalSetupError, match="answer_correctness"):
         EvaluatorFactory.build(["answer_corectness"])
 
@@ -317,4 +317,4 @@ def test_factory_rejects_unknown_evaluator() -> None:
 def test_factory_reports_judge_prompt_versions() -> None:
     """Prompt versions of the selected judge metrics go into the experiment metadata."""
     assert EvaluatorFactory.prompt_versions(["answer_correctness"]) == {"answer_correctness": "v1"}
-    assert EvaluatorFactory.names() == ["answer_correctness"]
+    assert EvaluatorFactory.metric_names() == ["answer_correctness"]

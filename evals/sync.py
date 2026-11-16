@@ -39,20 +39,20 @@ class SyncSummary:
     stale: int
 
 
-def check_evaluator_names(dataset: EvalDataset) -> None:
-    """Check that every case only names registered evaluators.
+def check_metric_names(dataset: EvalDataset) -> None:
+    """Check that every case only names metrics that have a registered evaluator.
 
     Args:
         dataset: The repo dataset.
 
     Raises:
-        EvalSetupError: If a case names an unknown evaluator.
+        EvalSetupError: If a case names an unknown metric.
     """
-    known = set(EvaluatorFactory.names())
+    known = set(EvaluatorFactory.metric_names())
     for case in dataset.cases:
-        unknown = sorted(set(case.evaluators) - known)
+        unknown = sorted(set(case.metrics) - known)
         if unknown:
-            raise EvalSetupError(f"Case {case.case_id} names unknown evaluators: {unknown}")
+            raise EvalSetupError(f"Case {case.case_id} names unknown metrics: {unknown}")
 
 
 def _update(case: EvalCase) -> ExampleUpdate:
@@ -143,7 +143,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         dataset = load_dataset(dataset_dir(args.dataset))
-        check_evaluator_names(dataset)
+        check_metric_names(dataset)
         repo = SqliteOrderRepository(settings.DB_PATH)
         check_reference_now(
             dataset.reference_now, repo.reference_now(), source=f"Dataset {dataset.name}"
@@ -167,4 +167,4 @@ if __name__ == "__main__":
     sys.exit(main())
 
 
-__all__ = ["SyncSummary", "check_evaluator_names", "main", "sync_dataset"]
+__all__ = ["SyncSummary", "check_metric_names", "main", "sync_dataset"]

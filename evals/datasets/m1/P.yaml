@@ -1,7 +1,7 @@
 # P: policy eligibility (answer only, no action). Scenarios P1-P8 in docs/scenarios.md.
 defaults:
   splits: [full]
-  evaluators: [answer_correctness]
+  metrics: [answer_correctness]
 
 cases:
   - case_id: P1-01

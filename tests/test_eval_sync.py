@@ -11,15 +11,15 @@ from pytest_mock import MockerFixture, MockType
 
 from evals.cases import EvalCase, EvalDataset
 from evals.errors import EvalSetupError
-from evals.sync import check_evaluator_names, sync_dataset
+from evals.sync import check_metric_names, sync_dataset
 
 
-def _case(case_id: str, evaluators: list[str] | None = None) -> EvalCase:
+def _case(case_id: str, metrics: list[str] | None = None) -> EvalCase:
     """Return a minimal valid case.
 
     Args:
         case_id: Case id, e.g. ``P4-01``.
-        evaluators: Metrics of the case.
+        metrics: Metrics of the case.
 
     Returns:
         The case.
@@ -29,7 +29,7 @@ def _case(case_id: str, evaluators: list[str] | None = None) -> EvalCase:
             "case_id": case_id,
             "scenario_id": case_id.split("-")[0],
             "splits": ["full"],
-            "evaluators": evaluators or ["answer_correctness"],
+            "metrics": metrics or ["answer_correctness"],
             "inputs": {"customer_email": "a@example.com", "question": "?"},
             "reference": {"expected_outcome": "x"},
         }
@@ -155,7 +155,7 @@ def test_sync_refuses_dataset_of_other_db_build(client: MockType, dataset: EvalD
     client.create_examples.assert_not_called()
 
 
-def test_check_evaluator_names_rejects_unknown_metric(today: datetime) -> None:
+def test_check_metric_names_rejects_unknown_metric(today: datetime) -> None:
     """A case naming an unregistered metric fails before anything is uploaded.
 
     Args:
@@ -163,4 +163,4 @@ def test_check_evaluator_names_rejects_unknown_metric(today: datetime) -> None:
     """
     dataset = EvalDataset("m9", "test", today, (_case("P3-01", ["answer_corectness"]),))
     with pytest.raises(EvalSetupError, match="answer_corectness"):
-        check_evaluator_names(dataset)
+        check_metric_names(dataset)

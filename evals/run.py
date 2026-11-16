@@ -1,7 +1,7 @@
 """Run an experiment: ``uv run python -m evals.run --dataset m1 --split smoke``.
 
 Runs the real agent on the selected LangSmith examples (``EVAL_REPEATS`` times each), grades
-every run with the selected evaluators, prints the report and attaches its overall numbers
+every run on the selected metrics, prints the report and attaches its overall numbers
 to the experiment. The dataset must have been written for the local database build.
 """
 
@@ -36,14 +36,14 @@ class RunArgs:
         dataset: Repo dataset name, e.g. ``"m1"``.
         split: Dataset split to run.
         families: Scenario families to keep (e.g. ``("P",)``); empty keeps all.
-        evaluators: Metric keys; empty means every metric the selected cases list.
+        metrics: Metric names; empty means every metric the selected cases list.
         description: Free-text description of the experiment.
     """
 
     dataset: str
     split: Split
     families: tuple[str, ...] = ()
-    evaluators: tuple[str, ...] = ()
+    metrics: tuple[str, ...] = ()
     description: str | None = None
 
 
@@ -63,9 +63,9 @@ def parse_args(argv: Sequence[str] | None) -> RunArgs:
         "--family", action="append", default=[], help="scenario family to run, e.g. P; repeatable"
     )
     parser.add_argument(
-        "--evaluators",
+        "--metrics",
         default="",
-        help="comma-separated metric keys (default: the metrics the selected cases list)",
+        help="comma-separated metric names (default: the metrics the selected cases list)",
     )
     parser.add_argument("--description", default=None, help="experiment description")
     args = parser.parse_args(argv)
@@ -73,7 +73,7 @@ def parse_args(argv: Sequence[str] | None) -> RunArgs:
         dataset=args.dataset,
         split=args.split,
         families=tuple(args.family),
-        evaluators=tuple(name for name in args.evaluators.split(",") if name),
+        metrics=tuple(name for name in args.metrics.split(",") if name),
         description=args.description,
     )
 
@@ -111,11 +111,11 @@ def select_examples(
 
 
 def metrics_for(examples: Sequence[Example], requested: Sequence[str]) -> list[str]:
-    """Return the metric keys to run.
+    """Return the names of the metrics to run.
 
     Args:
         examples: The selected examples.
-        requested: Keys given on the command line; empty to use the examples' metadata.
+        requested: Metric names given with ``--metrics``; empty to use the examples' metadata.
 
     Returns:
         ``requested``, or every metric the examples list, in first-seen order.
@@ -124,7 +124,7 @@ def metrics_for(examples: Sequence[Example], requested: Sequence[str]) -> list[s
         return list(requested)
     names: dict[str, None] = {}
     for example in examples:
-        for name in (example.metadata or {}).get("evaluators", []):
+        for name in (example.metadata or {}).get("metrics", []):
             names[name] = None
     return list(names)
 
@@ -170,7 +170,7 @@ def experiment_metadata(
 
     Args:
         args: The run arguments.
-        metrics: Metric keys being run.
+        metrics: Names of the metrics being run.
         repo: Repository on the database under test.
 
     Returns:
@@ -218,7 +218,7 @@ def run_experiment(args: RunArgs, client: Client, repo: OrderRepository) -> Repo
         source=f"LangSmith dataset {remote.name}",
     )
     examples = select_examples(client, remote.id, args.split, args.families)
-    metrics = metrics_for(examples, args.evaluators)
+    metrics = metrics_for(examples, args.metrics)
     evaluators = EvaluatorFactory.build(metrics)
     results = client.evaluate(
         AgentTarget(repo).invoke,

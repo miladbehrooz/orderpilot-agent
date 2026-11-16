@@ -2,7 +2,7 @@
 # (L2 and L4 need a clarification rubric or relative dates; they come later).
 defaults:
   splits: [full, smoke]
-  evaluators: [answer_correctness]
+  metrics: [answer_correctness]
 
 cases:
   - case_id: L1-01

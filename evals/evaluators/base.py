@@ -22,11 +22,11 @@ EvaluatorKind = Literal["gate", "score"]
 
 
 class Evaluator(ABC):
-    """One metric, called by LangSmith with ``(run, example)``.
+    """Evaluator for one metric (its ``key``), called by LangSmith with ``(run, example)``.
 
     ``__call__`` is a template method holding the policy every metric shares:
 
-    - a case whose metadata doesn't list this metric gets no result (not applicable);
+    - a case whose ``metrics`` don't include this one gets no result (not applicable);
     - a run that errored (exception, recursion limit) fails the metric;
     - a failure inside the evaluator emits ``evaluator_error`` instead of a score, so a
       broken judge is never counted as a failing agent.
@@ -34,7 +34,7 @@ class Evaluator(ABC):
     Subclasses set ``key`` (and ``kind``) and implement :meth:`evaluate`.
 
     Attributes:
-        key: Feedback key of the metric, also its name in ``EvaluatorFactory``.
+        key: Name of the metric: its feedback key, and the key in ``EvaluatorFactory``.
         kind: Whether the metric is a gate or a score.
     """
 
@@ -56,7 +56,7 @@ class Evaluator(ABC):
         Returns:
             The metric's results; an empty list when the metric doesn't apply.
         """
-        if example is None or self.key not in (example.metadata or {}).get("evaluators", []):
+        if example is None or self.key not in (example.metadata or {}).get("metrics", []):
             return {"results": []}
         if run.error:
             return {
@@ -105,7 +105,7 @@ class JudgeVerdict(BaseModel):
 
 
 class LLMJudgeEvaluator(Evaluator):
-    """Base for judge metrics: a versioned prompt run by an openevals judge.
+    """Base for LLM-judge evaluators: a versioned prompt run by an openevals judge.
 
     Args:
         judge: The judge chat model (from ``build_judge``); it must support structured output.

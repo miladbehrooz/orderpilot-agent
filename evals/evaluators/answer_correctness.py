@@ -10,7 +10,9 @@ from evals.prompts import ANSWER_CORRECTNESS_V1
 
 
 class AnswerCorrectnessEvaluator(LLMJudgeEvaluator):
-    """LLM judge comparing the final answer with the reference outcome and key facts.
+    """Evaluator for the ``answer_correctness`` metric.
+
+    An LLM judge compares the final answer with the reference outcome and key facts.
 
     The judge sees only the question, the answer and the reference. It never sees the tool
     outputs (whether claims are backed by tools is a separate groundedness metric) or the

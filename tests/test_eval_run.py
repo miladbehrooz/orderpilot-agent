@@ -18,18 +18,18 @@ from orderpilot.settings import settings
 from tests.stubs import StubRepository
 
 
-def _example(family: str, evaluators: list[str]) -> Example:
+def _example(family: str, metrics: list[str]) -> Example:
     """Return a remote example.
 
     Args:
         family: Scenario family in the metadata.
-        evaluators: Metrics listed in the metadata.
+        metrics: Metrics listed in the metadata.
 
     Returns:
         The example.
     """
     return Example.model_validate(
-        {"id": uuid4(), "metadata": {"scenario_family": family, "evaluators": evaluators}}
+        {"id": uuid4(), "metadata": {"scenario_family": family, "metrics": metrics}}
     )
 
 
@@ -74,8 +74,8 @@ def no_agent(mocker: MockerFixture) -> MockType:
 def test_parse_args_defaults_and_lists() -> None:
     """Defaults run the smoke split of m1; families repeat and metrics are comma-separated."""
     assert parse_args([]) == RunArgs(dataset="m1", split="smoke")
-    args = parse_args(["--split", "full", "--family", "P", "--family", "L", "--evaluators", "a,b"])
-    assert (args.split, args.families, args.evaluators) == ("full", ("P", "L"), ("a", "b"))
+    args = parse_args(["--split", "full", "--family", "P", "--family", "L", "--metrics", "a,b"])
+    assert (args.split, args.families, args.metrics) == ("full", ("P", "L"), ("a", "b"))
 
 
 @pytest.mark.usefixtures("no_agent")
@@ -143,7 +143,7 @@ def test_select_examples_rejects_empty_selection(client: MockType) -> None:
 
 
 def test_metrics_default_to_those_the_cases_list() -> None:
-    """Without --evaluators, the metrics are the ones the selected cases list, once each."""
+    """Without --metrics, the metrics are the ones the selected cases list, once each."""
     examples = [_example("P", ["a", "b"]), _example("L", ["b", "c"])]
     assert metrics_for(examples, []) == ["a", "b", "c"]
     assert metrics_for(examples, ["c"]) == ["c"]
