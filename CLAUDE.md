@@ -7,6 +7,7 @@
 - `docs/scenarios.md` — business rules and all scenarios (source of truth for behaviour and tests)
 - `docs/tools.md` — tool specs, reason codes, design principles
 - `docs/data.md` — database schema, cleaning, time handling, known quirks
+- `docs/evals.md` — evaluation design: pipeline, datasets, evaluators, metrics, roadmap
 
 If code and docs disagree, ask before changing either.
 
@@ -14,6 +15,7 @@ If code and docs disagree, ask before changing either.
 - Python 3.11+, LangChain + LangGraph, SQLite (stdlib `sqlite3`)
 - LangChain/LangGraph APIs change often: check the current docs before using an API, don't rely on memory.
 - Keep dependencies minimal.
+- Evals: LangSmith runs them (datasets, experiments); metrics are our own evaluator classes, using openevals for the generic parts (LLM-as-judge; trajectory match in `openevals.trajectory`). Judge model on OpenAI via `LLMFactory`. See `docs/evals.md`.
 
 ## Non-negotiable design rules
 1. **Business rules and date maths live in tool code**, never only in prompts. Tools return a decision, a `reason_code` and the supporting numbers; the LLM only explains them.
@@ -33,8 +35,7 @@ If code and docs disagree, ask before changing either.
 
 ## Open decisions (ask, don't decide silently)
 - How write confirmation (scenario W8) is enforced: LangGraph `interrupt()`, a confirm step in the tool contract, or prompt-only.
-- Which LLM provider/model to use.
-- Eval tooling (LangSmith or open-source).
+- Which LLM provider/model to use for the agent.
 
 ## Suggested layout
 ```
@@ -58,7 +59,7 @@ orderpilot-agent/
 │   ├── tools/            # thin LangChain @tool wrappers around services
 │   ├── agent/            # graph, state, prompts (knows only model + tools)
 │   └── policy.py         # eligibility logic shared by read and write tools
-├── evals/                # scenario generators, user simulator, graders
+├── evals/                # eval harness outside the package: cases, target, evaluators, runner (docs/evals.md)
 └── tests/                # pytest + pytest-mock unit tests (no real LLM calls)
 ```
 
@@ -73,6 +74,8 @@ uv run mypy                               # type check (strict)
 uv run pytest                             # tests
 uv run langgraph dev                      # local agent server + Studio (see README)
 uv run python -m orderpilot               # terminal chat with the agent
+uv run python -m evals.sync --dataset m1  # eval cases (evals/datasets/m1) -> LangSmith dataset
+uv run python -m evals.run --split smoke  # run an eval experiment (EVAL_REPEATS=k runs per case)
 ```
 
 ## Coding style
@@ -85,8 +88,9 @@ uv run python -m orderpilot               # terminal chat with the agent
   4. **A frozen dataclass config** created by a `default_config()` function and passed in explicitly, for fixed structural settings of a script in `scripts/` (see `BuildConfig` in `scripts/build_db.py`).
   5. **A pytest fixture** for test data (e.g. `today`), not a module-level `TODAY = ...`.
 - **Inside `src/orderpilot/` (and `evals/`), runtime configuration and policy values are read directly from the `settings` singleton** (`from orderpilot.settings import settings`) where they are needed, e.g. `settings.MAX_AUTH_ATTEMPTS` in `make_verify_customer` or `is_locked`. Don't thread `Settings` or individual policy values through function arguments. In tests, override a value with `mocker.patch.object(settings, "RETURN_WINDOW_DAYS", 10)`.
+- **Eval-only settings live in `evals/settings.py`** (`EvalSettings`, `env_prefix="EVAL_"`, singleton `eval_settings`): judge provider/model, repeats, concurrency. `evals/` reads those from `eval_settings` and everything else (API keys, policy values, `DB_PATH`) from `settings`, so graders and tools share one policy. Don't add eval-only fields to `Settings`.
 - **Scripts in `scripts/` are offline tooling outside the core and don't read `settings`**: their inputs come from CLI arguments, and their fixed structural settings from a `default_config()` dataclass passed in explicitly (option 4, e.g. `BuildConfig`). This keeps a build reproducible from its command line alone, independent of `.env`. The `logger` singleton may still be used.
-- Exceptions: `settings.py` (e.g. `PROJECT_ROOT`), `__all__`, `__version__`, type aliases, and the `logger`/`settings` singletons.
+- Exceptions: `settings.py` (e.g. `PROJECT_ROOT`), `__all__`, `__version__`, type aliases, and the `logger`/`settings`/`eval_settings` singletons.
 
 ## Testing
 - pytest with **pytest-mock**: use the `mocker` fixture (typed as `pytest_mock.MockerFixture`). Don't import `unittest.mock` directly or use `monkeypatch` for patching.

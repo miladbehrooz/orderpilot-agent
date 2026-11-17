@@ -1,0 +1,66 @@
+# L: lookups. Scenarios L1, L3, L5, L6 in docs/scenarios.md
+# (L2 and L4 need a clarification rubric or relative dates; they come later).
+defaults:
+  splits: [full, smoke]
+  metrics: [answer_correctness]
+
+cases:
+  - case_id: L1-01
+    scenario_id: L1
+    inputs:
+      customer_email: jeromevega@example.com
+      question: "Where's my order?"
+    reference:
+      expected_outcome: >-
+        The customer's only order, 58523, has shipped (on 2026-10-31) and has not been
+        delivered yet.
+      key_facts:
+        order_id: 58523
+        status: Shipped
+        shipped_on: "2026-10-31"
+    notes: "Single order; shipped 12 days ago, so not yet 'possibly lost'."
+
+  - case_id: L3-01
+    scenario_id: L3
+    inputs:
+      customer_email: jyoung90@example.com
+      question: "What's in order 41860?"
+    reference:
+      expected_outcome: >-
+        Order 41860 (Complete, delivered on 2026-11-04) has two items: the Volcom Men's
+        Fruckin Nuts Too Short for 11.96 and the RIGGS Men's Ranger Short (Wrangler) for
+        41.88.
+      key_facts:
+        order_id: 41860
+        status: Complete
+        delivered_on: "2026-11-04"
+        items:
+          - {name: "Volcom Men's Fruckin Nuts Too Short", price: 11.96}
+          - {name: "RIGGS Men's Ranger Short", brand: Wrangler, price: 41.88}
+
+  - case_id: L5-01
+    scenario_id: L5
+    inputs:
+      customer_email: brookejensen@example.com
+      question: "Did my return go through?"
+    reference:
+      expected_outcome: >-
+        Yes, the return of order 2417 went through on 2026-10-30. Both items were returned,
+        for a refund of 34.84 in total.
+      key_facts:
+        order_id: 2417
+        status: Returned
+        returned_on: "2026-10-30"
+        refund_total: 34.84
+    notes: "Items: Nautica tee 25.00 and Allegra K shorts 9.84."
+
+  - case_id: L6-01
+    scenario_id: L6
+    inputs:
+      customer_email: henrydennis@example.org
+      question: "Where's my order?"
+    reference:
+      expected_outcome: >-
+        The customer has no orders on their account. A correct answer says so and does not
+        invent an order or a status.
+      key_facts: {}
