@@ -1,6 +1,6 @@
 # E-commerce Support Agent: Evaluation Design (v1)
 
-_2026-11-16. Derived from `scenarios.md` and `tools.md`. Step 1 (sections 1–5, 7–9) is implemented; judge calibration (section 6) and later steps are not._
+_2026-11-17. Derived from `scenarios.md` and `tools.md`. Step 1 (sections 1–5, 7–9) and the first part of step 2 (`tool_correctness`, `argument_correctness`) are implemented; judge calibration (section 6) and later steps are not._
 
 ## Principles
 1. **Grade with code first, then state, then an LLM judge.** Tools return a `reason_code` and the supporting numbers, so most behaviour can be checked by code. An LLM judge is used only where meaning matters: whether the answer is correct, whether it asked a clarifying question, whether it refused.
@@ -30,8 +30,9 @@ evals/datasets/m1/*.yaml ──sync.py──▶ LangSmith dataset "orderpilot-m1
         ▼                                         ▼                                      ▼
  Target (per example)                    Evaluators (per run)                    Report (per experiment)
  seed a verified thread                  answer_correctness (judge)              pass rate, pass^k, pass@k
- invoke(question)                        later: trajectory, reason codes,        per scenario; flaky cases;
- → {answer, messages}                    leak gate, groundedness, DB state       evaluator errors; latency, cost
+ invoke(question)                        tool_correctness, argument_correctness  per scenario; flaky cases;
+ → {answer, messages}                    (code); later: reason codes, leak gate, evaluator errors; latency, cost
+                                         groundedness, DB state
                                                   │
                                 annotation queue → human labels → judge calibration
 ```
@@ -52,9 +53,13 @@ evals/datasets/m1/*.yaml ──sync.py──▶ LangSmith dataset "orderpilot-m1
       No, order 5110 can't be returned. It was delivered on 2026-09-28, 45 days ago, which
       is outside the 30-day return window (the deadline was 2026-10-28).
     key_facts: {order_id: 5110, delivered_on: "2026-09-28", days_since_delivery: 45}
-  metrics: [answer_correctness]      # usually set once in the file's defaults
+    expected_tool_calls:         # for tool_correctness / argument_correctness
+      - {name: check_return_eligibility, args: {order_id: 5110}}   # args: required subset; omit for "any"
+  metrics: [answer_correctness, tool_correctness, argument_correctness]   # usually in the file's defaults
   notes: "Far past the window."
 ```
+**Checks before upload** (`sync.check_dataset`, also run by `test_repo_datasets_are_valid`): every metric is registered; every case fills the reference fields its metrics need (`Evaluator.required_reference`, e.g. `expected_tool_calls`); and every expected tool call names a real tool and only arguments the model can set, read from the tools' model-facing schemas (`build_tools`), so a typo such as `orderid` fails before anything is uploaded.
+
 The customer is identified by email, which the target looks up with `OrderRepository.find_user_by_email`, so no internal id goes into the dataset and the repository needs no eval-only method.
 
 **Mapping to LangSmith**
@@ -88,7 +93,7 @@ graph.invoke({"messages": [HumanMessage(question)]}, config)
 - `as_node="agent"` is required. Checked against langgraph 1.2.22: `update_state` on a fresh thread *without* `as_node` goes through the input schema and drops `user_id`. With `as_node="agent"`, the last message has no tool calls, so the thread ends (`next == ()`), and the next `invoke` starts from START with `user_id` set.
 - AU scenarios don't use seeding. They start unverified, with scripted history.
 
-**Outputs:** `{"answer": <final AI text>, "messages": convert_to_openai_messages(<full trajectory>)}`. The trajectory is returned from step 1 on, so trajectory evaluators can be added later without changing the target. openevals' trajectory matchers accept OpenAI-format message dicts.
+**Outputs:** `{"answer": <final AI text>, "messages": convert_to_openai_messages(<this turn>)}`. "This turn" is the question and everything after it; the seeded verification exchange is left out, so trajectory metrics see only what the agent did for the question. The question is given an id before the run and found by it (`this_turn`), so the target doesn't depend on the length of the seeded history. openevals' trajectory matchers accept OpenAI-format message dicts.
 
 **Errors:** `evaluate(..., error_handling="log")` keeps errored runs in the experiment. Evaluators score them as failures (see the error policy below), so a crash never drops out of the denominator.
 
@@ -148,6 +153,14 @@ class EvaluatorFactory:
 - **The prompt** is a `JudgePrompt` (metric, version, text) in `JUDGE_PROMPTS` in `evals/prompts.py`. The evaluator stores only its `prompt_version` (`v2`), and `prompt_for` looks up the text. Old versions (`v1`) stay in the list so past experiments can be reproduced. The version goes into the experiment metadata.
 - **First slice:** P1–P8 plus L1, L3, L5 and L6, which have clear references. AM1, L2 and S need behaviour rubrics, and AU needs unverified starts; they come later.
 
+### Step 2 metrics: `tool_correctness`, `argument_correctness`
+- **Built on** openevals `create_trajectory_match_evaluator(trajectory_match_mode="superset", ...)`, wrapped in `TrajectoryMatchEvaluator` (`evals/evaluators/trajectory.py`). The case's `expected_tool_calls` become one reference assistant message.
+- **Superset trajectory:** every expected call needs its own matching call in the turn; extra calls and their order don't matter.
+- **Arguments:** `tool_correctness` ignores them (`tool_args_match_mode="ignore"`); `argument_correctness` requires every expected key with an equal value (`"superset"`). Values are compared strictly: `"2670"` is not `2670`. An expected call without `args` matches any call of that tool.
+- **Comment:** openevals returns only a bool. On a failure each expected call is matched again on its own, with the same matcher, and the comment names the missing ones, followed by the calls that were made, e.g. `Missing: get_order_details. Called: check_return_eligibility(order_id=2670).`
+- **Two metrics instead of one,** so the report separates "wrong tool" from "right tool, wrong order".
+- **Cases:** all of P and L1, L3, L5, L6. P8 expects `get_order_details` and then `check_return_eligibility` with `order_item_ids: [3862]`, following the agent prompt; checking all items or skipping the lookup fails `argument_correctness` / `tool_correctness` by design.
+
 ## 4. Orchestration: `run.py`
 ```bash
 uv run python -m evals.sync --dataset m1 [--prune]       # repo YAML → LangSmith
@@ -202,7 +215,10 @@ Tests live in `tests/`, use pytest-mock, and never call a real LLM:
 - **Case loader:** valid files load; schema errors fail at load time.
 - **`seed_verified_thread`:** against the real graph with a mocked model, `user_id` is set, the history is consistent, and the next `invoke` reaches the eligibility tools.
 - **`Evaluator.__call__`:** not-applicable emits nothing; an errored run scores `False`; a judge failure emits `evaluator_error`; keys are always set.
-- **`AnswerCorrectnessEvaluator`:** the judge is mocked; checks the mapping from judge output to result.
+- **`AnswerCorrectnessEvaluator`:** the judge is mocked; checks the mapping from judge output to result, and that expected tool calls never reach the judge.
+- **Trajectory metrics:** the real openevals matcher on hand-built OpenAI-format turns: missing, extra and reordered calls, wrong and extra arguments, strict values, the comment.
+- **Dataset checks:** unknown metrics, missing required reference fields, unknown tools and arguments (including injected ones such as `runtime`) are refused.
+- **Target:** only this turn's messages are returned.
 - **Report maths:** pass rate, pass^k, pass@k and flaky detection on hand-built rows.
 - **LangSmith contract:** our evaluator objects run through LangSmith's `run_evaluator`, including the empty not-applicable result.
 - **Sync and run:** LangSmith `Client` mocked with autospec: create vs update by stable id, pruning, DB-build refusals, `evaluate()` arguments and metadata.
@@ -220,7 +236,8 @@ evals/
 ├── sync.py                  # repo → LangSmith upsert
 ├── target.py                # AgentTarget, seed_verified_thread, verified_history
 ├── prompts.py               # versioned judge prompts
-├── evaluators/              # base.py (Evaluator, LLMJudgeEvaluator), factory.py, answer_correctness.py
+├── evaluators/              # base.py (Evaluator, LLMJudgeEvaluator), factory.py, answer_correctness.py,
+│                            # trajectory.py (TrajectoryMatchEvaluator), tool_correctness.py, argument_correctness.py
 ├── run.py                   # client.evaluate() entrypoint
 ├── report.py                # pass rate, pass^k, flaky, latency; attaches experiment feedback
 └── calibrate.py             # (step 1b, not yet) judge vs human agreement
@@ -228,11 +245,13 @@ evals/
 **Dependencies:** the `evals` dependency group (`langsmith`, `openevals`, `pyyaml`, `types-PyYAML`), installed by default. These are declared explicitly even where they arrive indirectly. Step 2 needs no new dependency: trajectory match is in `openevals.trajectory`.
 
 ## 10. Roadmap
+The full list of planned metrics, grouped by dimension, is in [`metrics.md`](metrics.md).
+
 | Step | Adds |
 |---|---|
 | **1** | Pipeline end to end, `answer_correctness`, report (P plus L1, L3, L5, L6). Done |
 | 1b | Judge calibration: annotation queue, `calibrate.py`, judge dataset |
-| 2 | Trajectory: expected tool calls and `reason_code` (code), openevals trajectory match |
+| 2 | Trajectory (code, openevals trajectory match): `tool_correctness` and `argument_correctness` done; `reason_code` and `step_count` next |
 | 3 | Gates and behaviour: leak scan (`kind="gate"`), clarification and refusal rubrics (AM, L2, S), AU with unverified starts |
 | 4 | Groundedness: claims in the answer against tool outputs in the trajectory |
 | 5 | Multi-turn: openevals simulated user (AU3, AM1 follow-ups) |
@@ -258,6 +277,8 @@ evals/
   - Extra keyword arguments fill the prompt template (`prompt.format(**kwargs)`).
   - LLM errors are not caught, hence our own error policy.
   - It also ships the trajectory matchers and trajectory judge (`openevals.trajectory`).
+  - `create_trajectory_match_evaluator(...)` is called with `outputs=` and `reference_outputs=` (OpenAI-format message lists; tool calls as `{"function": {"name", "arguments"}}` or `{"name", "args"}`) and returns `{"key": "trajectory_<mode>_match", "score": bool, "comment": None}`. Each call is `@traceable`, so it shows as a child trace of the evaluator.
+  - `superset` mode: each reference call is matched to its own output call with the same name; args mode `superset` means the output args contain every reference key with an equal value.
 - **agentevals 0.0.9 (2025-07-24):** no release in 16 months, and its trajectory matchers are now in openevals, so it is not used.
 
 ## Open questions

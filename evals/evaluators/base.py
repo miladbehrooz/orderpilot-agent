@@ -38,10 +38,13 @@ class Evaluator(ABC):
     Attributes:
         key: Name of the metric: its feedback key, and the key in ``EvaluatorFactory``.
         kind: Whether the metric is a gate or a score.
+        required_reference: Fields of the case ``Reference`` that a case listing this
+            metric must fill; ``sync`` refuses the case otherwise.
     """
 
     key: ClassVar[str]
     kind: ClassVar[EvaluatorKind] = "score"
+    required_reference: ClassVar[tuple[str, ...]] = ()
 
     def __init__(self) -> None:
         # LangSmith names evaluators (and their traces) by __name__, which objects lack.

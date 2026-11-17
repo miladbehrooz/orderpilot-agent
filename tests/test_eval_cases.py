@@ -5,8 +5,11 @@ from textwrap import dedent
 
 import pytest
 
-from evals.cases import EvalCase, dataset_dir, load_dataset
+from evals.cases import EvalCase, ToolCallSpec, dataset_dir, load_dataset
 from evals.errors import EvalSetupError
+from evals.sync import check_dataset
+from orderpilot.tools import build_tools
+from tests.stubs import StubRepository
 
 
 def _write(directory: Path, name: str, text: str) -> None:
@@ -115,6 +118,7 @@ def test_to_example_keeps_bookkeeping_out_of_inputs(dataset_path: Path) -> None:
     assert example.reference_outputs == {
         "expected_outcome": "No, outside the window",
         "key_facts": {"order_id": 1},
+        "expected_tool_calls": [],
     }
     assert example.metadata is not None
     assert example.metadata["scenario_id"] == "P4"
@@ -195,9 +199,46 @@ def test_case_rejects_unknown_field() -> None:
         )
 
 
-def test_repo_datasets_are_valid() -> None:
-    """The committed m1 dataset loads, and every scenario has a smoke case."""
+def test_tool_call_spec_rejects_unknown_field() -> None:
+    """``arguments:`` instead of ``args:`` is an error, not an empty expectation."""
+    with pytest.raises(ValueError, match="arguments"):
+        ToolCallSpec.model_validate({"name": "get_order_details", "arguments": {"order_id": 1}})
+
+
+def test_to_example_carries_expected_tool_calls() -> None:
+    """Expected tool calls reach the reference outputs as ``{name, args}`` dicts."""
+    case = EvalCase.model_validate(
+        {
+            "case_id": "L1-01",
+            "scenario_id": "L1",
+            "splits": ["full"],
+            "metrics": ["tool_correctness"],
+            "inputs": {"customer_email": "e@example.com", "question": "?"},
+            "reference": {
+                "expected_outcome": "x",
+                "expected_tool_calls": [
+                    {"name": "list_my_orders"},
+                    {"name": "get_order_details", "args": {"order_id": 1}},
+                ],
+            },
+        }
+    )
+    reference = case.to_example().reference_outputs
+    assert reference is not None
+    assert reference["expected_tool_calls"] == [
+        {"name": "list_my_orders", "args": {}},
+        {"name": "get_order_details", "args": {"order_id": 1}},
+    ]
+
+
+def test_repo_datasets_are_valid(stub_repo: StubRepository) -> None:
+    """The committed m1 dataset loads, passes the sync checks, and every scenario has a smoke case.
+
+    Args:
+        stub_repo: Stub repository, to build the real tools the expected calls are checked against.
+    """
     dataset = load_dataset(dataset_dir("m1"))
+    check_dataset(dataset, build_tools(stub_repo))
     scenarios = {case.scenario_id for case in dataset.cases}
     smoke = {case.scenario_id for case in dataset.cases if "smoke" in case.splits}
     assert scenarios == smoke

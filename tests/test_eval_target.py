@@ -13,7 +13,13 @@ from pytest_mock import MockerFixture, MockType
 
 from evals import target
 from evals.errors import EvalSetupError
-from evals.target import AgentTarget, final_answer, seed_verified_thread, verified_history
+from evals.target import (
+    AgentTarget,
+    final_answer,
+    seed_verified_thread,
+    this_turn,
+    verified_history,
+)
 from orderpilot.agent.graph import AgentGraph, build_graph, select_tools
 from orderpilot.agent.state import AgentState
 from orderpilot.domain import User
@@ -127,7 +133,7 @@ def test_final_answer_is_last_ai_text() -> None:
 
 @pytest.fixture
 def mocked_build_agent(mocker: MockerFixture) -> MockType:
-    """Replace build_agent with a mock returning a graph whose run ends with an AI answer.
+    """Replace build_agent with a mock graph whose run appends an AI answer to a seeded thread.
 
     Args:
         mocker: Pytest-mock fixture.
@@ -135,10 +141,24 @@ def mocked_build_agent(mocker: MockerFixture) -> MockType:
     Returns:
         The mocked ``build_agent``.
     """
+
+    def _invoke(graph_input: dict[str, Any], config: RunnableConfig) -> dict[str, Any]:
+        """Return the thread after a run: a seeded history, the input, and an answer.
+
+        Args:
+            graph_input: The invoke input, holding the turn's question.
+            config: The thread config.
+
+        Returns:
+            The final state's messages.
+        """
+        seeded = [HumanMessage("Hi, I'm Ann Lee."), AIMessage("Thank you, you're verified.")]
+        return {
+            "messages": [*seeded, *graph_input["messages"], AIMessage("Yes, until 2026-12-01.")]
+        }
+
     build: MockType = mocker.patch.object(target, "build_agent", autospec=True)
-    build.return_value.invoke.return_value = {
-        "messages": [HumanMessage("Can I return order 7?"), AIMessage("Yes, until 2026-12-01.")]
-    }
+    build.return_value.invoke.side_effect = _invoke
     return build
 
 
@@ -169,6 +189,31 @@ def test_agent_target_maps_final_answer(
     assert seeded == invoked
     assert len(set(invoked)) == 2
     assert graph.update_state.call_args.kwargs["as_node"] == "agent"
+
+
+@pytest.mark.usefixtures("mocked_build_agent")
+def test_agent_target_returns_only_this_turn(stub_repo: StubRepository, stub_user: User) -> None:
+    """The trajectory starts at the question; the seeded verification is left out.
+
+    Args:
+        stub_repo: Stub repository.
+        stub_user: The case's customer.
+    """
+    output = AgentTarget(stub_repo).invoke(
+        {"customer_email": stub_user.email, "question": "Can I return order 7?"}
+    )
+    assert output["messages"] == [
+        {"role": "user", "content": "Can I return order 7?"},
+        {"role": "assistant", "content": "Yes, until 2026-12-01."},
+    ]
+
+
+def test_this_turn_requires_question_in_thread() -> None:
+    """A question missing from the thread is a harness bug, not an empty trajectory."""
+    question = HumanMessage("q", id="question-1")
+    assert this_turn([AIMessage("a"), question, AIMessage("b")], question)[0] is question
+    with pytest.raises(EvalSetupError, match="question"):
+        this_turn([HumanMessage("q", id="other")], question)
 
 
 @pytest.mark.usefixtures("mocked_build_agent")

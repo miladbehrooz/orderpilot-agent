@@ -10,7 +10,9 @@ from typing import ClassVar
 
 from evals.errors import EvalSetupError
 from evals.evaluators.answer_correctness import AnswerCorrectnessEvaluator
+from evals.evaluators.argument_correctness import ArgumentCorrectnessEvaluator
 from evals.evaluators.base import Evaluator, LLMJudgeEvaluator
+from evals.evaluators.tool_correctness import ToolCorrectnessEvaluator
 from evals.judge import build_judge
 
 
@@ -19,6 +21,8 @@ class EvaluatorFactory:
 
     _REGISTRY: ClassVar[dict[str, type[Evaluator]]] = {
         AnswerCorrectnessEvaluator.key: AnswerCorrectnessEvaluator,
+        ToolCorrectnessEvaluator.key: ToolCorrectnessEvaluator,
+        ArgumentCorrectnessEvaluator.key: ArgumentCorrectnessEvaluator,
     }
 
     @classmethod
@@ -29,6 +33,21 @@ class EvaluatorFactory:
             Metric names in registration order.
         """
         return list(cls._REGISTRY)
+
+    @classmethod
+    def required_reference(cls, name: str) -> tuple[str, ...]:
+        """Return the reference fields a case listing this metric must fill.
+
+        Args:
+            name: Metric name.
+
+        Returns:
+            Field names of the case ``Reference``.
+
+        Raises:
+            EvalSetupError: If no evaluator is registered for ``name``.
+        """
+        return cls._lookup(name).required_reference
 
     @classmethod
     def _lookup(cls, name: str) -> type[Evaluator]:

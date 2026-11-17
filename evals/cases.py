@@ -39,18 +39,37 @@ class CaseInputs(BaseModel):
     question: str
 
 
+class ToolCallSpec(BaseModel):
+    """One tool call the agent is expected to make in the turn.
+
+    Attributes:
+        name: Tool name, e.g. ``check_return_eligibility``. ``sync`` checks it, and the
+            argument names, against the real tools.
+        args: Arguments the call must include, with exactly these values. Other arguments
+            may be present. Empty matches any arguments.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str = Field(pattern=r"^[a-z_]+$")
+    args: dict[str, Any] = Field(default_factory=dict)
+
+
 class Reference(BaseModel):
     """The hand-written expected result, seen only by the evaluators.
 
     Attributes:
         expected_outcome: The correct answer in one or two sentences.
         key_facts: Facts a correct answer may state (ids, dates, amounts, day counts).
+        expected_tool_calls: Tool calls the turn must contain, for the trajectory metrics.
+            The answer judge never sees them.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     expected_outcome: str
     key_facts: dict[str, Any] = Field(default_factory=dict)
+    expected_tool_calls: list[ToolCallSpec] = Field(default_factory=list)
 
 
 class EvalCase(BaseModel):
@@ -314,6 +333,7 @@ __all__ = [
     "EvalDataset",
     "Reference",
     "Split",
+    "ToolCallSpec",
     "check_reference_now",
     "dataset_dir",
     "langsmith_dataset_name",
