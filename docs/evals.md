@@ -101,9 +101,10 @@ graph.invoke({"messages": [HumanMessage(question)]}, config)
 Evaluators are objects, built by a factory that works like `LLMFactory`.
 
 ```python
-class Evaluator(ABC):
+class Evaluator(ABC):  # base.py: the policy every metric shares
     key: ClassVar[str]
     kind: ClassVar[Literal["gate", "score"]] = "score"
+    required_reference: ClassVar[tuple[str, ...]] = ()  # Reference fields sync requires
 
     def __call__(self, run: Run, example: Example | None) -> EvaluationResults:
         """Error policy and applicability, shared by every metric (template method)."""
@@ -112,19 +113,25 @@ class Evaluator(ABC):
     def evaluate(self, run: Run, example: Example) -> list[EvaluationResult]: ...
 
 
-class LLMJudgeEvaluator(Evaluator):  # holds the judge; the prompt is looked up by version
+class LLMJudgeEvaluator(Evaluator):  # llm_judge.py: holds the judge; prompt looked up by version
     prompt_version: ClassVar[str]
 
-    def __init__(self, judge: BaseChatModel) -> None: ...
+    def __init__(self, judge: BaseChatModel, reference_now: datetime) -> None: ...
 
 
-class AnswerCorrectnessEvaluator(LLMJudgeEvaluator):
+class TrajectoryMatchEvaluator(Evaluator):  # trajectory.py: openevals superset trajectory match
+    tool_args_match_mode: ClassVar[ToolArgsMatchMode]
+
+
+class AnswerCorrectnessEvaluator(LLMJudgeEvaluator):  # one module per metric
     key = "answer_correctness"
 
 
-class EvaluatorFactory:
+class EvaluatorFactory:  # factory.py
     _REGISTRY: ClassVar[dict[str, type[Evaluator]]] = {
-        "answer_correctness": AnswerCorrectnessEvaluator
+        "answer_correctness": AnswerCorrectnessEvaluator,
+        "tool_correctness": ToolCorrectnessEvaluator,
+        "argument_correctness": ArgumentCorrectnessEvaluator,
     }
 
     @classmethod
@@ -236,8 +243,8 @@ evals/
 ├── sync.py                  # repo → LangSmith upsert
 ├── target.py                # AgentTarget, seed_verified_thread, verified_history
 ├── prompts.py               # versioned judge prompts
-├── evaluators/              # base.py (Evaluator, LLMJudgeEvaluator), factory.py, answer_correctness.py,
-│                            # trajectory.py (TrajectoryMatchEvaluator), tool_correctness.py, argument_correctness.py
+├── evaluators/              # base.py (Evaluator), llm_judge.py (LLMJudgeEvaluator), trajectory.py
+│                            # (TrajectoryMatchEvaluator), factory.py, one module per metric
 ├── run.py                   # client.evaluate() entrypoint
 ├── report.py                # pass rate, pass^k, flaky, latency; attaches experiment feedback
 └── calibrate.py             # (step 1b, not yet) judge vs human agreement

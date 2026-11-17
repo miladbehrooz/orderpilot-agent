@@ -11,7 +11,8 @@ from typing import ClassVar
 from evals.errors import EvalSetupError
 from evals.evaluators.answer_correctness import AnswerCorrectnessEvaluator
 from evals.evaluators.argument_correctness import ArgumentCorrectnessEvaluator
-from evals.evaluators.base import Evaluator, LLMJudgeEvaluator
+from evals.evaluators.base import Evaluator
+from evals.evaluators.llm_judge import LLMJudgeEvaluator
 from evals.evaluators.tool_correctness import ToolCorrectnessEvaluator
 from evals.judge import build_judge
 

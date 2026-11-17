@@ -2,8 +2,9 @@
 
 from evals.evaluators.answer_correctness import AnswerCorrectnessEvaluator
 from evals.evaluators.argument_correctness import ArgumentCorrectnessEvaluator
-from evals.evaluators.base import Evaluator, EvaluatorKind, JudgeVerdict, LLMJudgeEvaluator
+from evals.evaluators.base import Evaluator, EvaluatorKind
 from evals.evaluators.factory import EvaluatorFactory
+from evals.evaluators.llm_judge import JudgeVerdict, LLMJudgeEvaluator
 from evals.evaluators.tool_correctness import ToolCorrectnessEvaluator
 from evals.evaluators.trajectory import TrajectoryMatchEvaluator
 

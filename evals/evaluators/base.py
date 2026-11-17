@@ -1,4 +1,4 @@
-"""Evaluator base classes: the shared error policy, and the LLM-judge base.
+"""Evaluator base class: the applicability and error policy every metric shares.
 
 LangSmith calls an evaluator with ``(run, example)`` when the parameters have exactly those
 names. Every evaluator returns ``EvaluationResults`` (``{"results": [...]}``): LangSmith
@@ -7,16 +7,11 @@ empty ``results`` list, which is how "not applicable" emits no feedback.
 """
 
 from abc import ABC, abstractmethod
-from datetime import datetime
-from typing import Any, ClassVar, Literal
+from typing import ClassVar, Literal
 
-from langchain_core.language_models import BaseChatModel
 from langsmith.evaluation.evaluator import EvaluationResult, EvaluationResults
 from langsmith.schemas import Example, Run
-from openevals.llm import create_llm_as_judge
-from pydantic import BaseModel, Field
 
-from evals.prompts import prompt_for
 from orderpilot.observability import logger
 
 EvaluatorKind = Literal["gate", "score"]
@@ -33,7 +28,9 @@ class Evaluator(ABC):
     - a failure inside the evaluator emits ``evaluator_error`` instead of a score, so a
       broken judge is never counted as a failing agent.
 
-    Subclasses set ``key`` (and ``kind``) and implement :meth:`evaluate`.
+    Subclasses set ``key`` (and ``kind``) and implement :meth:`evaluate`. Families of
+    metrics have their own base next to the library they wrap: ``LLMJudgeEvaluator``
+    (``llm_judge.py``) and ``TrajectoryMatchEvaluator`` (``trajectory.py``).
 
     Attributes:
         key: Name of the metric: its feedback key, and the key in ``EvaluatorFactory``.
@@ -97,54 +94,4 @@ class Evaluator(ABC):
         """
 
 
-class JudgeVerdict(BaseModel):
-    """Structured output of a pass/fail judge. Reasoning comes first, so the verdict follows it.
-
-    Attributes:
-        reasoning: Step-by-step check of the answer against the rubric.
-        verdict: Whether the answer passes the rubric.
-    """
-
-    reasoning: str = Field(description="Step-by-step check of the answer against the rubric.")
-    verdict: bool = Field(description="True if the answer passes the rubric, otherwise false.")
-
-
-class LLMJudgeEvaluator(Evaluator):
-    """Base for LLM-judge evaluators: a versioned prompt run by an openevals judge.
-
-    Args:
-        judge: The judge chat model (from ``build_judge``); it must support structured output.
-        reference_now: TODAY of the database the agent ran on. The judge is told this date,
-            so it counts days from the same date the agent and the references use.
-
-    Attributes:
-        prompt_version: Version of the judge prompt (see ``evals/prompts.py``), recorded in
-            results and experiment metadata. The prompt text is looked up from it.
-        today: ``reference_now`` as an ISO date, the ``{today}`` placeholder of the prompt.
-    """
-
-    prompt_version: ClassVar[str]
-
-    def __init__(self, judge: BaseChatModel, reference_now: datetime) -> None:
-        super().__init__()
-        self.today = reference_now.date().isoformat()
-        self._judge = create_llm_as_judge(
-            prompt=prompt_for(self.key, self.prompt_version),
-            judge=judge,
-            feedback_key=self.key,
-            output_schema=JudgeVerdict,
-        )
-
-    def _ask(self, **variables: Any) -> JudgeVerdict:
-        """Run the judge on the prompt filled with ``variables`` and today's date.
-
-        Args:
-            **variables: Values for the prompt's placeholders, other than ``today``.
-
-        Returns:
-            The judge's verdict.
-        """
-        return JudgeVerdict.model_validate(self._judge(today=self.today, **variables))
-
-
-__all__ = ["Evaluator", "EvaluatorKind", "JudgeVerdict", "LLMJudgeEvaluator"]
+__all__ = ["Evaluator", "EvaluatorKind"]

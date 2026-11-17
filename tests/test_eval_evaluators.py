@@ -1,7 +1,7 @@
 """Evaluators: error policy, answer and trajectory metrics, the factory, the LangSmith contract.
 
-The judge model is never called: ``create_llm_as_judge`` is mocked where the base class
-looks it up. The trajectory metrics run the real openevals matcher on hand-built turns.
+The judge model is never called: ``create_llm_as_judge`` is mocked where the judge base
+class looks it up. The trajectory metrics run the real openevals matcher on hand-built turns.
 """
 
 from collections.abc import Callable
@@ -33,8 +33,8 @@ from evals.evaluators import (
     ToolCorrectnessEvaluator,
     TrajectoryMatchEvaluator,
 )
-from evals.evaluators import base as base_module
 from evals.evaluators import factory as factory_module
+from evals.evaluators import llm_judge as llm_judge_module
 from evals.prompts import JUDGE_PROMPTS, JudgePrompt, prompt_for
 
 RunFactory = Callable[..., Run]
@@ -136,7 +136,7 @@ def judge_fn(mocker: MockerFixture) -> MockType:
     Returns:
         The mocked judge callable; it returns a passing verdict unless changed.
     """
-    create: MockType = mocker.patch.object(base_module, "create_llm_as_judge", autospec=True)
+    create: MockType = mocker.patch.object(llm_judge_module, "create_llm_as_judge", autospec=True)
     judge: MockType = create.return_value
     judge.return_value = JudgeVerdict(reasoning="Decision and deadline match.", verdict=True)
     return judge
