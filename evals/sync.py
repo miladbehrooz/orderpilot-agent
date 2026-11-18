@@ -9,6 +9,8 @@ import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from langchain.tools import BaseTool
+from langchain_core.utils.function_calling import convert_to_openai_tool
 from langsmith import Client
 from langsmith.schemas import ExampleUpdate
 
@@ -20,6 +22,7 @@ from orderpilot.errors import OrderPilotError
 from orderpilot.observability import logger
 from orderpilot.repository import SqliteOrderRepository
 from orderpilot.settings import settings
+from orderpilot.tools import build_tools
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,6 +56,71 @@ def check_metric_names(dataset: EvalDataset) -> None:
         unknown = sorted(set(case.metrics) - known)
         if unknown:
             raise EvalSetupError(f"Case {case.case_id} names unknown metrics: {unknown}")
+
+
+def check_metric_references(dataset: EvalDataset) -> None:
+    """Check that every case fills the reference fields its metrics need.
+
+    Args:
+        dataset: The repo dataset; its metric names must be known (``check_metric_names``).
+
+    Raises:
+        EvalSetupError: If a case lists a metric but leaves one of its required fields empty.
+    """
+    for case in dataset.cases:
+        for metric in case.metrics:
+            required = EvaluatorFactory.required_reference(metric)
+            missing = [field for field in required if not getattr(case.reference, field)]
+            if missing:
+                raise EvalSetupError(
+                    f"Case {case.case_id} lists {metric} but has no {', '.join(missing)}"
+                )
+
+
+def check_expected_tool_calls(dataset: EvalDataset, tools: Sequence[BaseTool]) -> None:
+    """Check that every expected tool call names a real tool and arguments the model can set.
+
+    The arguments come from each tool's model-facing schema, so injected ones such as
+    ``runtime`` are refused too.
+
+    Args:
+        dataset: The repo dataset.
+        tools: The agent's tools (``build_tools``).
+
+    Raises:
+        EvalSetupError: If a call names an unknown tool or an unknown argument.
+    """
+    params = {
+        tool.name: set(convert_to_openai_tool(tool)["function"]["parameters"].get("properties", {}))
+        for tool in tools
+    }
+    for case in dataset.cases:
+        for call in case.reference.expected_tool_calls:
+            if call.name not in params:
+                valid = ", ".join(params)
+                raise EvalSetupError(
+                    f"Case {case.case_id} expects unknown tool {call.name!r}. Valid: {valid}"
+                )
+            unknown = sorted(set(call.args) - params[call.name])
+            if unknown:
+                raise EvalSetupError(
+                    f"Case {case.case_id} expects {call.name} with unknown arguments {unknown}"
+                )
+
+
+def check_dataset(dataset: EvalDataset, tools: Sequence[BaseTool]) -> None:
+    """Run every repo-side check of a dataset before it is uploaded.
+
+    Args:
+        dataset: The repo dataset.
+        tools: The agent's tools (``build_tools``).
+
+    Raises:
+        EvalSetupError: If a check fails.
+    """
+    check_metric_names(dataset)
+    check_metric_references(dataset)
+    check_expected_tool_calls(dataset, tools)
 
 
 def _update(case: EvalCase) -> ExampleUpdate:
@@ -143,8 +211,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         dataset = load_dataset(dataset_dir(args.dataset))
-        check_metric_names(dataset)
         repo = SqliteOrderRepository(settings.DB_PATH)
+        check_dataset(dataset, build_tools(repo))
         check_reference_now(
             dataset.reference_now, repo.reference_now(), source=f"Dataset {dataset.name}"
         )
@@ -167,4 +235,12 @@ if __name__ == "__main__":
     sys.exit(main())
 
 
-__all__ = ["SyncSummary", "check_metric_names", "main", "sync_dataset"]
+__all__ = [
+    "SyncSummary",
+    "check_dataset",
+    "check_expected_tool_calls",
+    "check_metric_names",
+    "check_metric_references",
+    "main",
+    "sync_dataset",
+]

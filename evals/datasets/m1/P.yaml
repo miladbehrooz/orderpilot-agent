@@ -1,7 +1,8 @@
 # P: policy eligibility (answer only, no action). Scenarios P1-P8 in docs/scenarios.md.
+# expected_tool_calls follow docs/tools.md and the agent prompt.
 defaults:
   splits: [full]
-  metrics: [answer_correctness]
+  metrics: [answer_correctness, tool_correctness, argument_correctness]
 
 cases:
   - case_id: P1-01
@@ -19,6 +20,8 @@ cases:
         order_id: 97953
         status: Processing
         created_on: "2026-10-28"
+      expected_tool_calls:
+        - {name: check_cancellation_eligibility, args: {order_id: 97953}}
     notes: "Every Processing order in this DB build is older than 7 days, so P1 is also stuck."
 
   - case_id: P2-01
@@ -35,6 +38,8 @@ cases:
         order_id: 6738
         status: Shipped
         shipped_on: "2026-10-31"
+      expected_tool_calls:
+        - {name: check_cancellation_eligibility, args: {order_id: 6738}}
     notes: "Shipped 12 days ago, so not yet 'possibly lost' (more than 14 days)."
 
   - case_id: P3-01
@@ -53,6 +58,8 @@ cases:
         days_since_delivery: 8
         refund_total: 19.99
         return_deadline: "2026-12-04"
+      expected_tool_calls:
+        - {name: check_return_eligibility, args: {order_id: 87511}}
     notes: "Most recent deliveries in this DB build are 8 days old."
 
   - case_id: P3-02
@@ -71,6 +78,8 @@ cases:
         days_since_delivery: 30
         refund_total: 276.00
         return_deadline: "2026-11-12"
+      expected_tool_calls:
+        - {name: check_return_eligibility, args: {order_id: 13959}}
     notes: "Boundary: day 30 is eligible."
 
   - case_id: P4-01
@@ -88,6 +97,8 @@ cases:
         delivered_on: "2026-09-28"
         days_since_delivery: 45
         return_deadline: "2026-10-28"
+      expected_tool_calls:
+        - {name: check_return_eligibility, args: {order_id: 5110}}
     notes: "Far past the window."
 
   - case_id: P4-02
@@ -104,6 +115,8 @@ cases:
         delivered_on: "2026-10-12"
         days_since_delivery: 31
         return_deadline: "2026-11-11"
+      expected_tool_calls:
+        - {name: check_return_eligibility, args: {order_id: 4481}}
     notes: "Boundary: day 31 is not eligible."
 
   - case_id: P5-01
@@ -120,6 +133,8 @@ cases:
         order_id: 73008
         status: Shipped
         shipped_on: "2026-10-31"
+      expected_tool_calls:
+        - {name: check_return_eligibility, args: {order_id: 73008}}
 
   - case_id: P6-01
     scenario_id: P6
@@ -133,6 +148,8 @@ cases:
       key_facts:
         order_id: 116
         status: Cancelled
+      expected_tool_calls:
+        - {name: check_return_eligibility, args: {order_id: 116}}
 
   - case_id: P7-01
     scenario_id: P7
@@ -148,6 +165,8 @@ cases:
         order_id: 1233
         status: Returned
         returned_on: "2026-10-29"
+      expected_tool_calls:
+        - {name: check_return_eligibility, args: {order_id: 1233}}
 
   - case_id: P8-01
     scenario_id: P8
@@ -169,4 +188,7 @@ cases:
         delivered_on: "2026-11-01"
         days_since_delivery: 11
         return_deadline: "2026-12-01"
+      expected_tool_calls:
+        - {name: get_order_details, args: {order_id: 2670}}
+        - {name: check_return_eligibility, args: {order_id: 2670, order_item_ids: [3862]}}
     notes: "The other item is a James Jeans brand short (category Shorts): 'jeans' is a trap."

@@ -101,6 +101,28 @@ def final_answer(messages: Sequence[BaseMessage]) -> str:
     return ""
 
 
+def this_turn(messages: Sequence[AnyMessage], question: HumanMessage) -> list[AnyMessage]:
+    """Return the messages of the current turn: the question and everything after it.
+
+    The seeded verification exchange comes before the question and is left out, so
+    trajectory metrics see only what the agent did for this question.
+
+    Args:
+        messages: The whole thread after the run.
+        question: The turn's question, given an id before the run so it can be found.
+
+    Returns:
+        The question and the messages that follow it.
+
+    Raises:
+        EvalSetupError: If the question is not in the thread (a harness bug).
+    """
+    for index, message in enumerate(messages):
+        if message.id == question.id:
+            return list(messages[index:])
+    raise EvalSetupError("The turn's question is missing from the thread")
+
+
 class AgentTarget:
     """The LangSmith target: one agent graph, one fresh seeded thread per example.
 
@@ -122,8 +144,9 @@ class AgentTarget:
             inputs: Example inputs: ``customer_email`` and ``question``.
 
         Returns:
-            ``answer`` (the final reply) and ``messages`` (the full trajectory in OpenAI
-            format, for trajectory metrics).
+            ``answer`` (the final reply) and ``messages`` (this turn's trajectory, from the
+            question on and without the seeded verification, in OpenAI format, for the
+            trajectory metrics).
 
         Raises:
             EvalSetupError: If the case's customer is not in the database; that is a bug in
@@ -134,12 +157,13 @@ class AgentTarget:
             raise EvalSetupError(f"Unknown customer_email {inputs['customer_email']!r}")
         config: RunnableConfig = {"configurable": {"thread_id": str(uuid4())}}
         seed_verified_thread(self._graph, config, user)
-        state = self._graph.invoke({"messages": [HumanMessage(inputs["question"])]}, config)
-        messages: list[AnyMessage] = state["messages"]
+        question = HumanMessage(inputs["question"], id=str(uuid4()))
+        state = self._graph.invoke({"messages": [question]}, config)
+        messages = this_turn(state["messages"], question)
         return {
             "answer": final_answer(messages),
             "messages": convert_to_openai_messages(messages),
         }
 
 
-__all__ = ["AgentTarget", "final_answer", "seed_verified_thread", "verified_history"]
+__all__ = ["AgentTarget", "final_answer", "seed_verified_thread", "this_turn", "verified_history"]

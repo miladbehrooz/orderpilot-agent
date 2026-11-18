@@ -8,6 +8,7 @@
 - `docs/tools.md` — tool specs, reason codes, design principles
 - `docs/data.md` — database schema, cleaning, time handling, known quirks
 - `docs/evals.md` — evaluation design: pipeline, datasets, evaluators, metrics, roadmap
+- `docs/metrics.md` — metric catalogue: dimensions, each metric's question, scenarios, grader, gate/score, step
 
 If code and docs disagree, ask before changing either.
 
