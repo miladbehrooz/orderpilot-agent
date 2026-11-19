@@ -1,0 +1,94 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="840" viewBox="0 0 760 840" role="img" aria-labelledby="title desc">
+  <title id="title">OrderPilot example conversation</title>
+  <desc id="desc">A customer, James Patel, asks to see his orders, verifies his identity, asks to cancel the order that is still processing (it can be cancelled, through customer support) and asks about a shipped order (it can't be cancelled, but can be returned after delivery).</desc>
+  <defs>
+    <linearGradient id="avatar" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6366f1"/>
+      <stop offset="1" stop-color="#2563eb"/>
+    </linearGradient>
+    <clipPath id="card"><rect x="0.5" y="0.5" width="759" height="839" rx="16"/></clipPath>
+    <style>
+      text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; font-size: 14px; }
+      .agent { fill: #0f172a; }
+      .user { fill: #ffffff; }
+      .muted { fill: #64748b; font-size: 12px; }
+      .b { font-weight: 600; }
+      .warn { fill: #b45309; }
+    </style>
+  </defs>
+
+  <!-- Window -->
+  <rect x="0.5" y="0.5" width="759" height="839" rx="16" fill="#ffffff" stroke="#e2e8f0"/>
+  <g clip-path="url(#card)">
+    <rect x="0" y="0" width="760" height="64" fill="#f8fafc"/>
+    <line x1="0" y1="64" x2="760" y2="64" stroke="#e2e8f0"/>
+    <line x1="0" y1="764" x2="760" y2="764" stroke="#e2e8f0"/>
+  </g>
+
+  <!-- Header -->
+  <circle cx="40" cy="32" r="17" fill="url(#avatar)"/>
+  <text x="40" y="37" text-anchor="middle" fill="#ffffff" font-size="12" class="b" style="font-size:12px">OP</text>
+  <text x="68" y="28" class="agent b" style="font-size:15px">OrderPilot</text>
+  <circle cx="72" cy="43" r="3.5" fill="#22c55e"/>
+  <text x="81" y="47" class="muted">Customer support · online</text>
+
+  <!-- Date chip -->
+  <rect x="318" y="80" width="124" height="22" rx="11" fill="#f1f5f9"/>
+  <text x="380" y="95" text-anchor="middle" class="muted">Today · 12 Nov 2026</text>
+
+  <!-- 1. Customer -->
+  <rect x="490" y="118" width="246" height="40" rx="16" fill="#2563eb"/>
+  <text x="504" y="143" class="user">Hi, can you show me my orders?</text>
+
+  <!-- 2. Agent -->
+  <circle cx="38" cy="186" r="14" fill="url(#avatar)"/>
+  <text x="38" y="190" text-anchor="middle" fill="#ffffff" class="b" style="font-size:10px">OP</text>
+  <rect x="62" y="170" width="520" height="60" rx="16" fill="#f1f5f9"/>
+  <text x="78" y="195" class="agent">Sure! First I need to verify your identity. Please give me</text>
+  <text x="78" y="215" class="agent">your first name, last name, email address and postal code.</text>
+
+  <!-- 3. Customer -->
+  <rect x="386" y="242" width="350" height="40" rx="16" fill="#2563eb"/>
+  <text x="400" y="267" class="user">James Patel, jamespatel@example.org, 68695-000</text>
+
+  <!-- 4. Agent: order list -->
+  <circle cx="38" cy="310" r="14" fill="url(#avatar)"/>
+  <text x="38" y="314" text-anchor="middle" fill="#ffffff" class="b" style="font-size:10px">OP</text>
+  <rect x="62" y="294" width="520" height="164" rx="16" fill="#f1f5f9"/>
+  <text x="78" y="319" class="agent">Thanks, James, you're verified. Here are your orders:</text>
+  <text x="78" y="347" class="agent">• <tspan class="b">57001</tspan>: shipped on 31 Oct, 1 item, $279.00</text>
+  <text x="78" y="371" class="agent">• <tspan class="b">57000</tspan>: placed on 28 Oct and still processing, 1 item,</text>
+  <text x="90" y="391" class="agent">$125.00. <tspan class="warn">It has been processing for 15 days, which is</tspan></text>
+  <text x="90" y="411" class="warn">longer than it should take.</text>
+  <text x="78" y="435" class="agent">• <tspan class="b">56999</tspan>: delivered on 4 Nov, 2 items, $103.28</text>
+
+  <!-- 5. Customer -->
+  <rect x="430" y="470" width="306" height="40" rx="16" fill="#2563eb"/>
+  <text x="444" y="495" class="user">Please cancel the one that's still processing.</text>
+
+  <!-- 6. Agent -->
+  <circle cx="38" cy="538" r="14" fill="url(#avatar)"/>
+  <text x="38" y="542" text-anchor="middle" fill="#ffffff" class="b" style="font-size:10px">OP</text>
+  <rect x="62" y="522" width="520" height="100" rx="16" fill="#f1f5f9"/>
+  <text x="78" y="547" class="agent">Order <tspan class="b">57000</tspan> can be cancelled, because it hasn't shipped yet.</text>
+  <text x="78" y="567" class="agent">I can't cancel orders myself yet, so please contact customer</text>
+  <text x="78" y="587" class="agent">support and they'll process it. Since it's been stuck for</text>
+  <text x="78" y="607" class="agent">15 days, they can also look into the delay.</text>
+
+  <!-- 7. Customer -->
+  <rect x="590" y="634" width="146" height="40" rx="16" fill="#2563eb"/>
+  <text x="604" y="659" class="user">And order 57001?</text>
+
+  <!-- 8. Agent -->
+  <circle cx="38" cy="702" r="14" fill="url(#avatar)"/>
+  <text x="38" y="706" text-anchor="middle" fill="#ffffff" class="b" style="font-size:10px">OP</text>
+  <rect x="62" y="686" width="520" height="60" rx="16" fill="#f1f5f9"/>
+  <text x="78" y="711" class="agent">Order <tspan class="b">57001</tspan> can't be cancelled: it already shipped on 31 Oct.</text>
+  <text x="78" y="731" class="agent">Once it's delivered, you can return it within 30 days.</text>
+
+  <!-- Input bar -->
+  <rect x="24" y="780" width="660" height="40" rx="20" fill="#f8fafc" stroke="#e2e8f0"/>
+  <text x="44" y="805" class="muted" style="font-size:14px">Ask about your orders…</text>
+  <circle cx="716" cy="800" r="20" fill="#2563eb"/>
+  <path d="M708 800 L724 800 M717 793 L724 800 L717 807" stroke="#ffffff" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
