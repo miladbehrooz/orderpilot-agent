@@ -13,6 +13,7 @@ from pytest_mock import MockerFixture, MockType
 from evals.cases import EvalCase, EvalDataset
 from evals.errors import EvalSetupError
 from evals.sync import (
+    check_expected_reason_codes,
     check_expected_tool_calls,
     check_metric_names,
     check_metric_references,
@@ -189,6 +190,17 @@ def test_check_metric_references_requires_expected_tool_calls(today: datetime) -
         check_metric_references(dataset)
 
 
+def test_check_metric_references_requires_expected_reason_code(today: datetime) -> None:
+    """A case listing ``reason_code`` without an expected reason code is refused.
+
+    Args:
+        today: TODAY of the test shop.
+    """
+    dataset = EvalDataset("m9", "test", today, (_case("P4-01", ["reason_code"]),))
+    with pytest.raises(EvalSetupError, match=r"P4-01 lists reason_code.*expected_reason_code"):
+        check_metric_references(dataset)
+
+
 def test_check_metric_references_accepts_filled_reference(today: datetime) -> None:
     """A case that fills every required field passes.
 
@@ -274,3 +286,51 @@ def test_check_expected_tool_calls_rejects_unknown_argument(
     dataset = _dataset_expecting(today, {"name": "get_order_details", "args": {argument: 1}})
     with pytest.raises(EvalSetupError, match=rf"get_order_details.*{argument}"):
         check_expected_tool_calls(dataset, tools)
+
+
+def _dataset_expecting_code_from(today: datetime, tool: str) -> EvalDataset:
+    """Return a one-case dataset whose case expects a reason code from ``tool``.
+
+    Args:
+        today: TODAY of the test shop.
+        tool: Tool name the expected reason code comes from.
+
+    Returns:
+        The dataset.
+    """
+    reference = {
+        "expected_outcome": "x",
+        "expected_reason_code": {"tool": tool, "code": "WINDOW_EXPIRED"},
+    }
+    case = _case("P4-01", ["reason_code"], reference)
+    return EvalDataset("m9", "test", today, (case,))
+
+
+def test_check_expected_reason_codes_accepts_real_tool(
+    today: datetime, tools: list[BaseTool]
+) -> None:
+    """A reason code expected from a real tool passes.
+
+    Args:
+        today: TODAY of the test shop.
+        tools: Real agent tools.
+    """
+    check_expected_reason_codes(
+        _dataset_expecting_code_from(today, "check_return_eligibility"), tools
+    )
+
+
+def test_check_expected_reason_codes_rejects_unknown_tool(
+    today: datetime, tools: list[BaseTool]
+) -> None:
+    """A reason code expected from a misspelt tool fails with the valid names.
+
+    Args:
+        today: TODAY of the test shop.
+        tools: Real agent tools.
+    """
+    dataset = _dataset_expecting_code_from(today, "check_return_eligibilty")
+    with pytest.raises(
+        EvalSetupError, match=r"P4-01.*check_return_eligibilty.*Valid: .*check_return_eligibility"
+    ):
+        check_expected_reason_codes(dataset, tools)

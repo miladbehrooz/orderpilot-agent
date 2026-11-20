@@ -1,4 +1,4 @@
-"""Experiment report: pass rate, pass^k and pass@k per scenario, flaky cases, latency.
+"""Experiment report: pass rate, pass^k and pass@k per scenario, flaky cases, measures, latency.
 
 The maths runs on a small internal row type (:class:`ScoredRun`), so it is testable without
 LangSmith objects; :func:`scored_runs` adapts LangSmith's experiment rows to it.
@@ -11,7 +11,7 @@ writes the overall numbers back to the experiment as experiment-level feedback.
 import math
 from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import ClassVar, TypedDict
 from uuid import UUID
 
@@ -49,6 +49,8 @@ class ScoredRun:
         scenario_id: Scenario id, e.g. ``P4``.
         scores: Metric key to pass/fail. Metrics that didn't apply or whose evaluator
             failed are absent.
+        measures: Measure key (e.g. ``step_count``) to its value, likewise only when
+            measured.
         evaluator_errors: Number of ``evaluator_error`` results on this run.
         latency_s: Wall-clock duration of the run, if known.
     """
@@ -57,6 +59,7 @@ class ScoredRun:
     case_id: str
     scenario_id: str
     scores: Mapping[str, bool]
+    measures: Mapping[str, float] = field(default_factory=dict)
     evaluator_errors: int = 0
     latency_s: float | None = None
 
@@ -90,11 +93,36 @@ class MetricSummary:
 
 
 @dataclass(frozen=True, slots=True)
+class MeasureSummary:
+    """One measure over the runs of one scenario (or ``MetricSummary.OVERALL``).
+
+    Attributes:
+        scenario_id: Scenario id, or ``MetricSummary.OVERALL``.
+        metric: Measure key, e.g. ``step_count``.
+        runs: Number of measured runs.
+        mean: Mean value.
+        p50: Median (nearest rank).
+        p95: 95th percentile (nearest rank).
+        max: Largest value.
+    """
+
+    scenario_id: str
+    metric: str
+    runs: int
+    mean: float
+    p50: float
+    p95: float
+    max: float
+
+
+@dataclass(frozen=True, slots=True)
 class Report:
     """Summary of one experiment.
 
     Attributes:
         metrics: Per-scenario summaries, followed by one ``OVERALL`` row per metric.
+        measures: Per-scenario measure summaries, followed by one ``OVERALL`` row per
+            measure. Measures never fail a gate.
         evaluator_errors: Total ``evaluator_error`` results.
         latency_p50_s: Median run latency, if known.
         latency_p95_s: 95th-percentile run latency, if known.
@@ -102,6 +130,7 @@ class Report:
     """
 
     metrics: tuple[MetricSummary, ...]
+    measures: tuple[MeasureSummary, ...]
     evaluator_errors: int
     latency_p50_s: float | None
     latency_p95_s: float | None
@@ -135,11 +164,13 @@ class Report:
         )
 
 
-def scored_runs(rows: Iterable[ResultRow]) -> list[ScoredRun]:
+def scored_runs(rows: Iterable[ResultRow], kinds: Mapping[str, EvaluatorKind]) -> list[ScoredRun]:
     """Convert LangSmith experiment rows to :class:`ScoredRun` objects.
 
     Args:
         rows: Rows of ``client.evaluate`` results (one per run, repetitions included).
+        kinds: Metric key to its kind; a ``measure`` keeps its number, any other result is
+            read as pass/fail.
 
     Returns:
         One scored run per row.
@@ -149,11 +180,15 @@ def scored_runs(rows: Iterable[ResultRow]) -> list[ScoredRun]:
         run, example = row["run"], row["example"]
         metadata = example.metadata or {}
         results = row["evaluation_results"].get("results", [])
-        scores = {
-            r.key: bool(r.score)
-            for r in results
-            if r.key != "evaluator_error" and r.score is not None
-        }
+        scores: dict[str, bool] = {}
+        measures: dict[str, float] = {}
+        for r in results:
+            if r.key == "evaluator_error" or r.score is None:
+                continue
+            if kinds.get(r.key) == "measure":
+                measures[r.key] = float(r.score)
+            else:
+                scores[r.key] = bool(r.score)
         latency = (run.end_time - run.start_time).total_seconds() if run.end_time else None
         runs.append(
             ScoredRun(
@@ -161,6 +196,7 @@ def scored_runs(rows: Iterable[ResultRow]) -> list[ScoredRun]:
                 case_id=str(metadata.get("case_id", example.id)),
                 scenario_id=str(metadata.get("scenario_id", "?")),
                 scores=scores,
+                measures=measures,
                 evaluator_errors=sum(r.key == "evaluator_error" for r in results),
                 latency_s=latency,
             )
@@ -216,6 +252,52 @@ def _summarize_metric(scenario_id: str, metric: str, runs: Sequence[ScoredRun]) 
     )
 
 
+def _summarize_measure(scenario_id: str, metric: str, values: Sequence[float]) -> MeasureSummary:
+    """Summarize one measure over a group of runs.
+
+    Args:
+        scenario_id: Scenario id of the group, or ``OVERALL``.
+        metric: Measure key.
+        values: The measure of each run in the group; not empty.
+
+    Returns:
+        The summary.
+    """
+    return MeasureSummary(
+        scenario_id=scenario_id,
+        metric=metric,
+        runs=len(values),
+        mean=sum(values) / len(values),
+        p50=_percentile(values, 50) or 0.0,
+        p95=_percentile(values, 95) or 0.0,
+        max=max(values),
+    )
+
+
+def _summarize_measures(runs: Sequence[ScoredRun]) -> list[MeasureSummary]:
+    """Summarize every measure per scenario and overall.
+
+    Args:
+        runs: Every run of the experiment.
+
+    Returns:
+        Per-scenario summaries of each measure, followed by its ``OVERALL`` row.
+    """
+    summaries: list[MeasureSummary] = []
+    for metric in sorted({metric for run in runs for metric in run.measures}):
+        by_scenario: dict[str, list[float]] = defaultdict(list)
+        for run in runs:
+            if metric in run.measures:
+                by_scenario[run.scenario_id].append(run.measures[metric])
+        summaries.extend(
+            _summarize_measure(scenario, metric, values)
+            for scenario, values in sorted(by_scenario.items())
+        )
+        overall = [value for values in by_scenario.values() for value in values]
+        summaries.append(_summarize_measure(MetricSummary.OVERALL, metric, overall))
+    return summaries
+
+
 def summarize(runs: Sequence[ScoredRun], kinds: Mapping[str, EvaluatorKind]) -> Report:
     """Summarize an experiment per scenario and overall.
 
@@ -249,6 +331,7 @@ def summarize(runs: Sequence[ScoredRun], kinds: Mapping[str, EvaluatorKind]) -> 
     )
     return Report(
         metrics=tuple(summaries),
+        measures=tuple(_summarize_measures(runs)),
         evaluator_errors=sum(run.evaluator_errors for run in runs),
         latency_p50_s=_percentile(latencies, 50),
         latency_p95_s=_percentile(latencies, 95),
@@ -263,7 +346,8 @@ def format_report(report: Report) -> str:
         report: The report.
 
     Returns:
-        A table with one row per scenario and metric, followed by run statistics.
+        A table with one row per scenario and metric, a table of the measures (if any),
+        then run statistics.
     """
     header = f"{'scenario':<9} {'metric':<22} {'cases':>5} {'runs':>5} {'pass':>6} "
     header += f"{'pass^k':>7} {'pass@k':>7}  flaky"
@@ -275,6 +359,18 @@ def format_report(report: Report) -> str:
             f"{m.scenario_id:<9} {m.metric:<22} {m.cases:>5} {m.runs:>5} {m.pass_rate:>6.0%} "
             f"{m.pass_hat_k:>7.0%} {m.pass_at_k:>7.0%}  {', '.join(m.flaky_cases)}"
         )
+
+    if report.measures:
+        measure_header = f"{'scenario':<9} {'measure':<22} {'runs':>5} {'mean':>6} "
+        measure_header += f"{'p50':>6} {'p95':>6} {'max':>6}"
+        lines += ["", measure_header, "-" * len(measure_header)]
+        for s in report.measures:
+            if s.scenario_id == MetricSummary.OVERALL:
+                lines.append("-" * len(measure_header))
+            lines.append(
+                f"{s.scenario_id:<9} {s.metric:<22} {s.runs:>5} {s.mean:>6.1f} "
+                f"{s.p50:>6g} {s.p95:>6g} {s.max:>6g}"
+            )
 
     def _seconds(value: float | None) -> str:
         """Format an optional duration.
@@ -300,7 +396,8 @@ def format_report(report: Report) -> str:
 def attach_to_experiment(client: Client, experiment_id: UUID, report: Report) -> None:
     """Write the overall numbers to the experiment as experiment-level feedback.
 
-    Keys are ``<metric>:pass_rate``, ``<metric>:pass^k`` and ``<metric>:pass@k``.
+    Keys are ``<metric>:pass_rate``, ``<metric>:pass^k`` and ``<metric>:pass@k``, and
+    ``<measure>:mean`` and ``<measure>:p95`` for each measure.
 
     Args:
         client: LangSmith client.
@@ -318,9 +415,17 @@ def attach_to_experiment(client: Client, experiment_id: UUID, report: Report) ->
             client.create_feedback(
                 None, f"{summary.metric}:{name}", score=score, project_id=experiment_id
             )
+    for measure in report.measures:
+        if measure.scenario_id != MetricSummary.OVERALL:
+            continue
+        for name, value in (("mean", measure.mean), ("p95", measure.p95)):
+            client.create_feedback(
+                None, f"{measure.metric}:{name}", score=value, project_id=experiment_id
+            )
 
 
 __all__ = [
+    "MeasureSummary",
     "MetricSummary",
     "Report",
     "ResultRow",

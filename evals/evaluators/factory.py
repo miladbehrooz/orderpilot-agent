@@ -13,6 +13,8 @@ from evals.evaluators.answer_correctness import AnswerCorrectnessEvaluator
 from evals.evaluators.argument_correctness import ArgumentCorrectnessEvaluator
 from evals.evaluators.base import Evaluator
 from evals.evaluators.llm_judge import LLMJudgeEvaluator
+from evals.evaluators.reason_code import ReasonCodeEvaluator
+from evals.evaluators.step_count import StepCountEvaluator
 from evals.evaluators.tool_correctness import ToolCorrectnessEvaluator
 from evals.judge import build_judge
 
@@ -24,6 +26,8 @@ class EvaluatorFactory:
         AnswerCorrectnessEvaluator.key: AnswerCorrectnessEvaluator,
         ToolCorrectnessEvaluator.key: ToolCorrectnessEvaluator,
         ArgumentCorrectnessEvaluator.key: ArgumentCorrectnessEvaluator,
+        ReasonCodeEvaluator.key: ReasonCodeEvaluator,
+        StepCountEvaluator.key: StepCountEvaluator,
     }
 
     @classmethod

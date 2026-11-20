@@ -1,8 +1,10 @@
 # P: policy eligibility (answer only, no action). Scenarios P1-P8 in docs/scenarios.md.
-# expected_tool_calls follow docs/tools.md and the agent prompt.
+# expected_tool_calls follow docs/tools.md and the agent prompt; expected_reason_code is
+# hand-written from docs/tools.md, never computed by policy.py.
 defaults:
   splits: [full]
-  metrics: [answer_correctness, tool_correctness, argument_correctness]
+  metrics:
+    [answer_correctness, tool_correctness, argument_correctness, reason_code, step_count]
 
 cases:
   - case_id: P1-01
@@ -22,6 +24,7 @@ cases:
         created_on: "2026-10-28"
       expected_tool_calls:
         - {name: check_cancellation_eligibility, args: {order_id: 97953}}
+      expected_reason_code: {tool: check_cancellation_eligibility, code: ELIGIBLE}
     notes: "Every Processing order in this DB build is older than 7 days, so P1 is also stuck."
 
   - case_id: P2-01
@@ -40,6 +43,7 @@ cases:
         shipped_on: "2026-10-31"
       expected_tool_calls:
         - {name: check_cancellation_eligibility, args: {order_id: 6738}}
+      expected_reason_code: {tool: check_cancellation_eligibility, code: ALREADY_SHIPPED}
     notes: "Shipped 12 days ago, so not yet 'possibly lost' (more than 14 days)."
 
   - case_id: P3-01
@@ -60,6 +64,7 @@ cases:
         return_deadline: "2026-12-04"
       expected_tool_calls:
         - {name: check_return_eligibility, args: {order_id: 87511}}
+      expected_reason_code: {tool: check_return_eligibility, code: ELIGIBLE}
     notes: "Most recent deliveries in this DB build are 8 days old."
 
   - case_id: P3-02
@@ -80,6 +85,7 @@ cases:
         return_deadline: "2026-11-12"
       expected_tool_calls:
         - {name: check_return_eligibility, args: {order_id: 13959}}
+      expected_reason_code: {tool: check_return_eligibility, code: ELIGIBLE}
     notes: "Boundary: day 30 is eligible."
 
   - case_id: P4-01
@@ -99,6 +105,7 @@ cases:
         return_deadline: "2026-10-28"
       expected_tool_calls:
         - {name: check_return_eligibility, args: {order_id: 5110}}
+      expected_reason_code: {tool: check_return_eligibility, code: WINDOW_EXPIRED}
     notes: "Far past the window."
 
   - case_id: P4-02
@@ -117,6 +124,7 @@ cases:
         return_deadline: "2026-11-11"
       expected_tool_calls:
         - {name: check_return_eligibility, args: {order_id: 4481}}
+      expected_reason_code: {tool: check_return_eligibility, code: WINDOW_EXPIRED}
     notes: "Boundary: day 31 is not eligible."
 
   - case_id: P5-01
@@ -135,6 +143,7 @@ cases:
         shipped_on: "2026-10-31"
       expected_tool_calls:
         - {name: check_return_eligibility, args: {order_id: 73008}}
+      expected_reason_code: {tool: check_return_eligibility, code: NOT_DELIVERED}
 
   - case_id: P6-01
     scenario_id: P6
@@ -150,6 +159,7 @@ cases:
         status: Cancelled
       expected_tool_calls:
         - {name: check_return_eligibility, args: {order_id: 116}}
+      expected_reason_code: {tool: check_return_eligibility, code: ORDER_CANCELLED}
 
   - case_id: P7-01
     scenario_id: P7
@@ -167,6 +177,7 @@ cases:
         returned_on: "2026-10-29"
       expected_tool_calls:
         - {name: check_return_eligibility, args: {order_id: 1233}}
+      expected_reason_code: {tool: check_return_eligibility, code: ALREADY_RETURNED}
 
   - case_id: P8-01
     scenario_id: P8
@@ -191,4 +202,5 @@ cases:
       expected_tool_calls:
         - {name: get_order_details, args: {order_id: 2670}}
         - {name: check_return_eligibility, args: {order_id: 2670, order_item_ids: [3862]}}
+      expected_reason_code: {tool: check_return_eligibility, code: ELIGIBLE}
     notes: "The other item is a James Jeans brand short (category Shorts): 'jeans' is a trap."

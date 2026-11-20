@@ -1,16 +1,15 @@
 """Trajectory-match base: the turn's tool calls against the case's expected tool calls."""
 
 import json
-from collections.abc import Sequence
 from typing import Any, ClassVar
 
-from langchain_core.messages import AIMessage, ToolCall, convert_to_messages
 from langsmith.evaluation.evaluator import EvaluationResult
 from langsmith.schemas import Example, Run
 from openevals.trajectory.match import create_trajectory_match_evaluator
 from openevals.types import ToolArgsMatchMode
 
 from evals.evaluators.base import Evaluator
+from evals.evaluators.messages import tool_calls
 
 
 class TrajectoryMatchEvaluator(Evaluator):
@@ -50,7 +49,7 @@ class TrajectoryMatchEvaluator(Evaluator):
         messages: list[dict[str, Any]] = (run.outputs or {}).get("messages", [])
         expected: list[dict[str, Any]] = (example.outputs or {})["expected_tool_calls"]
         passed = self._matches(messages, expected)
-        made = ", ".join(_describe(c["name"], c["args"]) for c in _tool_calls(messages))
+        made = ", ".join(_describe(c["name"], c["args"]) for c in tool_calls(messages))
         comment = f"Called: {made or 'no tools'}."
         if not passed:
             missing = [call for call in expected if not self._matches(messages, [call])]
@@ -94,23 +93,6 @@ class TrajectoryMatchEvaluator(Evaluator):
             name: str = call["name"]
             return name
         return _describe(call["name"], call["args"])
-
-
-def _tool_calls(messages: Sequence[dict[str, Any]]) -> list[ToolCall]:
-    """Return the tool calls made in a turn, with parsed arguments.
-
-    Args:
-        messages: The turn, in OpenAI format.
-
-    Returns:
-        The calls of every AI message, in order.
-    """
-    return [
-        call
-        for message in convert_to_messages(messages)
-        if isinstance(message, AIMessage)
-        for call in message.tool_calls
-    ]
 
 
 def _describe(name: str, args: dict[str, Any]) -> str:

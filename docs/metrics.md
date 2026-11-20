@@ -1,6 +1,6 @@
 # E-commerce Support Agent: Metric Catalogue (v1)
 
-_2026-11-17. Derived from `scenarios.md`, `tools.md` and `evals.md`. The catalogue of metrics OrderPilot is (or will be) evaluated on. `evals.md` describes how the harness runs them._
+_2026-11-18. Derived from `scenarios.md`, `tools.md` and `evals.md`. The catalogue of metrics OrderPilot is (or will be) evaluated on. `evals.md` describes how the harness runs them._
 
 ## How metrics are chosen
 1. **From failure modes, not from a library catalogue.** Each metric detects one way OrderPilot can fail, and maps to the scenarios in `scenarios.md` where that failure is possible.
@@ -19,15 +19,15 @@ _2026-11-17. Derived from `scenarios.md`, `tools.md` and `evals.md`. The catalog
 | **Task completion** | Did the customer get the right result? | `answer_correctness`, `db_state_correct`, `task_success` | `answer_correctness` done |
 | **Tool correctness** | Did the agent call the right tools? | `tool_correctness` | done |
 | **Argument correctness** | With the right arguments? | `argument_correctness` | done |
-| **Decision grounding** | Did the decision come from the tool, and does the answer follow it? | `reason_code`, `decision_consistency` | step 2 / after calibration |
-| **Step efficiency** | How much work did it take? | `step_count` | step 2 |
+| **Decision grounding** | Did the decision come from the tool, and does the answer follow it? | `reason_code`, `decision_consistency` | `reason_code` done |
+| **Step efficiency** | How much work did it take? | `step_count` | done |
 | **Faithfulness** | Is every claim backed by a tool output? | `grounded_facts`, `groundedness` | step 3 / after calibration |
 | **Safety and policy** | Did anything happen that must never happen? | `no_data_leak`, `no_internal_ids`, `auth_before_data`, `no_field_hint`, `lockout_reply`, `injection_resistance` | step 3 |
 | **Conversation behaviour** | Did it behave well when the request was unclear or out of scope? | `asks_clarification`, `scope_redirect`, `flags_stuck_or_lost` | step 3 / after calibration |
 | **Write safety** (Milestone 2) | Did writes happen only when allowed and confirmed? | `no_write_without_confirmation`, `no_ineligible_write`, `exactly_one_ticket` | M2 |
 | **Plan quality and adherence** | Was the plan sound, and was it followed? | (later) | supervisor/worker version |
 | **Reliability** (applies to all) | Does it work every time? | pass^k, pass@k, flaky cases | done (report) |
-| **Cost and speed** (applies to all) | What does a conversation cost? | latency p50/p95, tokens, agent error rate | partly done (report) |
+| **Cost and speed** (applies to all) | What does a conversation cost? | latency p50/p95, tokens, agent error rate | latency done (report); tokens not yet |
 
 ## Catalogue
 
@@ -57,19 +57,20 @@ _2026-11-17. Derived from `scenarios.md`, `tools.md` and `evals.md`. The catalog
 ### Decision grounding
 | Metric | Question | Scenarios | Grader | Kind | Reference needed | Step |
 |---|---|---|---|---|---|---|
-| `reason_code` | Did the eligibility tool return the expected `reason_code` to the agent? | P1–P8 | code: parse the tool messages | score | `expected_reason_code` | 2 |
+| `reason_code` | Did the eligibility tool return the expected `reason_code` to the agent? | P1–P8 | code: the tool's last result in the turn | score | `expected_reason_code` (`tool`, `code`) | **done** |
 | `decision_consistency` | Does the answer's decision (can / cannot) follow the tool's `eligible` and `reason_code`? ("Never override a tool's decision.") | P | judge (or a small classifier) | score | none (uses the trajectory) | after calibration |
 
-- Once the right tool is called with the right `order_id`, the code is decided by `policy.py`. So `reason_code` mostly repeats `argument_correctness` plus the policy unit tests. Its own value is in end-to-end checks where the arguments shape the decision (P8 item-level, the day-30/31 boundaries).
+- Once the right tool is called with the right `order_id`, the code is decided by `policy.py`. So `reason_code` mostly repeats `argument_correctness` plus the policy unit tests. Its own value is the end-to-end check against hand-written codes on the real DB build, sharpest at the day-30/31 boundaries (P3-02, P4-02). It does not catch P8's item selection: checking both items of order 2670 also gives `ELIGIBLE`, so that is `argument_correctness`'s job.
+- The tool's **last** result counts, so a retry after a wrong order id is graded on the final check.
 - `decision_consistency` catches the failure that matters more: the tool said `WINDOW_EXPIRED` but the answer says "yes, you can return it".
 
 ### Step efficiency
 | Metric | Question | Scenarios | Grader | Kind | Reference needed | Step |
 |---|---|---|---|---|---|---|
-| `step_count` | How many tool calls and graph steps did the turn take? | all | code | numeric, reported (not pass/fail) | none | 2 |
+| `step_count` | How many tool calls did the turn take? | all | code | measure (number, not pass/fail) | none | **done** |
 
-- Reported as p50/p95 per scenario next to latency and tokens. A high `answer_correctness` with a high `step_count` means the agent works but needs optimising.
-- The report currently handles pass/fail scores only; numeric metrics need a small report extension.
+- The score is the number of tool calls; the comment adds the model calls. Reported as mean, p50, p95 and max per scenario next to latency. A high `answer_correctness` with a high `step_count` means the agent works but needs optimising.
+- A crashed run emits no step count; it already fails every pass/fail metric.
 
 ### Faithfulness
 | Metric | Question | Scenarios | Grader | Kind | Reference needed | Step |
@@ -113,7 +114,7 @@ OrderPilot is a single tool-calling loop with no explicit plan and one or two to
 ### Applied to every metric
 - **Reliability:** each case runs k times (`EVAL_REPEATS`). The report gives pass rate, pass^k (every run passes: reliability) and pass@k (at least one passes: capability) per scenario, plus the flaky cases.
 - **Robustness:** the same case with paraphrased questions ("can I send it back?", typos, another language). This extends the dataset, not the metric set.
-- **Cost and speed:** latency p50/p95 and mean tokens per run (in the report); agent error rate (crashes, recursion limit) from failed runs; cost per conversation once token prices are configured.
+- **Cost and speed:** latency p50/p95 per run (in the report); tokens per run not yet (the target's OpenAI-format messages drop the usage metadata, so they need a target change); agent error rate (crashes, recursion limit) from failed runs; cost per conversation once tokens and prices are available.
 
 ## Deliberately not used
 - **Generic catalogue metrics** (BLEU/ROUGE, "answer relevancy", "helpfulness 1–5", toxicity): cheap to add, but no OrderPilot failure mode maps to them, so a good score proves nothing.
@@ -123,9 +124,9 @@ OrderPilot is a single tool-calling loop with no explicit plan and one or two to
 ## Roadmap by step
 | Step | Metrics |
 |---|---|
-| 1 (done) | `answer_correctness`; reliability (pass^k, pass@k, flaky); latency and tokens |
+| 1 (done) | `answer_correctness`; reliability (pass^k, pass@k, flaky); latency |
 | 1b | Calibration of the `answer_correctness` judge (judge dataset, TPR/TNR/κ) |
-| 2 | `tool_correctness`, `argument_correctness` (done); `reason_code`, `step_count` |
+| 2 (done) | `tool_correctness`, `argument_correctness`, `reason_code`, `step_count` |
 | 3 | Code gates: `no_data_leak`, `no_internal_ids`, `auth_before_data`, `lockout_reply`, `no_field_hint` (code part), `injection_resistance` (code part); `grounded_facts`; `flags_stuck_or_lost`. New S, AU and Q cases |
 | After calibration | Judge metrics: `decision_consistency`, `groundedness`, `asks_clarification`, `scope_redirect`, and the judge parts of `no_field_hint` and `injection_resistance`, each calibrated like `answer_correctness` |
 | 5 | `task_success` with a simulated customer (multi-turn) |

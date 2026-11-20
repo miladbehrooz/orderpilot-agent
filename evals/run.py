@@ -231,7 +231,8 @@ def run_experiment(args: RunArgs, client: Client, repo: OrderRepository) -> Repo
         metadata=experiment_metadata(args, metrics, repo),
         error_handling="log",
     )
-    report = summarize(scored_runs(results), kinds={e.key: e.kind for e in evaluators})
+    kinds = {e.key: e.kind for e in evaluators}
+    report = summarize(scored_runs(results, kinds), kinds=kinds)
     attach_to_experiment(client, results.experiment_id, report)
     return report
 
