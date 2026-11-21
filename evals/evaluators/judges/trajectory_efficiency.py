@@ -1,6 +1,6 @@
 """Trajectory efficiency: were needless calls avoided? A reference-free judge."""
 
-from evals.evaluators.trajectory_judge import TrajectoryJudgeEvaluator
+from evals.evaluators.judges.trajectory_judge import TrajectoryJudgeEvaluator
 
 
 class TrajectoryEfficiencyEvaluator(TrajectoryJudgeEvaluator):

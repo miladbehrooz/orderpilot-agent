@@ -1,6 +1,6 @@
 """The agent's contract given to the trajectory judges, built from the real prompt and tools."""
 
-from evals.contract import agent_contract
+from evals.evaluators.judges.contract import agent_contract
 from orderpilot.tools import build_tools
 from tests.stubs import StubRepository
 

@@ -9,16 +9,17 @@ from langsmith.evaluation.evaluator import EvaluationResult
 from langsmith.schemas import Example, Run
 from openevals.trajectory.llm import create_trajectory_llm_as_judge
 
-from evals.evaluators.llm_judge import JudgeVerdict, LLMJudgeEvaluator
+from evals.evaluators.judges.llm_judge import JudgeVerdict, LLMJudgeEvaluator
 
 
 class TrajectoryJudgeEvaluator(LLMJudgeEvaluator):
     """Base for reference-free judges of a turn's trajectory, run by openevals.
 
-    The judge sees today's date, the agent's contract (``evals.contract.agent_contract``)
-    and the whole turn: the question, every tool call with its arguments, every tool result
-    and the final answer. It never sees the reference, the example metadata or the step
-    count, so it grades any case, with or without a hand-written reference.
+    The judge sees today's date, the agent's contract (``agent_contract`` in
+    ``evals.evaluators.judges.contract``) and the whole turn: the question, every tool call
+    with its arguments, every tool result and the final answer. It never sees the
+    reference, the example metadata or the step count, so it grades any case, with or
+    without a hand-written reference.
 
     Args:
         judge: The judge chat model (from ``build_judge``); it must support structured output.

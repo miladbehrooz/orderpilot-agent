@@ -1,6 +1,6 @@
 """Argument correctness: were the expected tools called with the expected key arguments?"""
 
-from evals.evaluators.trajectory import TrajectoryMatchEvaluator
+from evals.evaluators.code.trajectory_match import TrajectoryMatchEvaluator
 
 
 class ArgumentCorrectnessEvaluator(TrajectoryMatchEvaluator):

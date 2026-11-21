@@ -117,7 +117,7 @@ graph.invoke({"messages": [HumanMessage(question)]}, config)
 **Errors:** `evaluate(..., error_handling="log")` keeps errored runs in the experiment. Evaluators score them as failures (see the error policy below), so a crash never drops out of the denominator.
 
 ## 3. Evaluator layer
-Evaluators are objects, built by a factory that works like `LLMFactory`.
+Evaluators are objects, built by a factory that works like `LLMFactory`. They are grouped by grader type: `evaluators/code/` (deterministic checks over the run's messages) and `evaluators/judges/` (LLM judges, with their prompts and the agent's contract); `state/` (Milestone 2) and `simulation/` (step 5) will follow the same pattern. The public import path stays `evals.evaluators`.
 
 ```python
 class Evaluator(ABC):  # base.py: the policy every metric shares
@@ -132,7 +132,9 @@ class Evaluator(ABC):  # base.py: the policy every metric shares
     def evaluate(self, run: Run, example: Example) -> list[EvaluationResult]: ...
 
 
-class LLMJudgeEvaluator(Evaluator):  # llm_judge.py: holds the judge; prompt looked up by version
+class LLMJudgeEvaluator(
+    Evaluator
+):  # judges/llm_judge.py: holds the judge; prompt looked up by version
     prompt_version: ClassVar[str]
 
     def __init__(self, judge: BaseChatModel, reference_now: datetime) -> None: ...
@@ -140,12 +142,12 @@ class LLMJudgeEvaluator(Evaluator):  # llm_judge.py: holds the judge; prompt loo
     def _verdict(self, raw) -> JudgeVerdict: ...  # reads that judge's output
 
 
-class TrajectoryJudgeEvaluator(LLMJudgeEvaluator):  # trajectory_judge.py: reference-free
+class TrajectoryJudgeEvaluator(LLMJudgeEvaluator):  # judges/trajectory_judge.py: reference-free
     def __init__(self, judge, reference_now, contract: str) -> None: ...
     def _make_judge(self, judge, prompt): ...  # openevals create_trajectory_llm_as_judge
 
 
-class TrajectoryMatchEvaluator(Evaluator):  # trajectory.py: openevals superset trajectory match
+class TrajectoryMatchEvaluator(Evaluator):  # code/trajectory_match.py: openevals superset
     tool_args_match_mode: ClassVar[ToolArgsMatchMode]
 
 
@@ -190,11 +192,11 @@ The step 1 and 2 metrics below are the **reference-based** ones: since v2 they s
 - **Judge sees:** today's date (the database's `reference_now`, so day counts are checked against the same date the agent used), the question, the final answer and the reference (`expected_outcome`, `key_facts`). It does **not** see tool outputs (that is `faithfulness`, step 3) or any metadata.
 - **Output schema:** `reasoning` (written first), then `verdict: bool`. Pass/fail only, no 1–5 scale: it is easier to calibrate and easier to act on.
 - **Rubric (v2):** the decision matches the expected outcome; the key facts that are stated are correct, with day counts checked against today's date; nothing contradicts the reference; the reason is given only when the question asks why or how. Leaving out extra detail is fine; a wrong fact fails the answer.
-- **The prompt** is a `JudgePrompt` (metric, version, text) in `JUDGE_PROMPTS` in `evals/prompts.py`. The evaluator stores only its `prompt_version` (`v2`), and `prompt_for` looks up the text. Old versions (`v1`) stay in the list so past experiments can be reproduced. The version goes into the experiment metadata.
+- **The prompt** is a `JudgePrompt` (metric, version, text) in `JUDGE_PROMPTS` in `evals/evaluators/judges/prompts.py`. The evaluator stores only its `prompt_version` (`v2`), and `prompt_for` looks up the text. Old versions (`v1`) stay in the list so past experiments can be reproduced. The version goes into the experiment metadata.
 - **First slice:** P1–P8 plus L1, L3, L5 and L6, which have clear references. AM1, L2 and S need behaviour rubrics, and AU needs unverified starts; they come later.
 
 ### Step 2 metrics: `tool_correctness`, `argument_correctness`
-- **Built on** openevals `create_trajectory_match_evaluator(trajectory_match_mode="superset", ...)`, wrapped in `TrajectoryMatchEvaluator` (`evals/evaluators/trajectory.py`). The case's `expected_tool_calls` become one reference assistant message.
+- **Built on** openevals `create_trajectory_match_evaluator(trajectory_match_mode="superset", ...)`, wrapped in `TrajectoryMatchEvaluator` (`evals/evaluators/code/trajectory_match.py`). The case's `expected_tool_calls` become one reference assistant message.
 - **Superset trajectory:** every expected call needs its own matching call in the turn; extra calls and their order don't matter.
 - **Arguments:** `tool_correctness` ignores them (`tool_args_match_mode="ignore"`); `argument_correctness` requires every expected key with an equal value (`"superset"`). Values are compared strictly: `"2670"` is not `2670`. An expected call without `args` matches any call of that tool.
 - **Comment:** openevals returns only a bool. On a failure each expected call is matched again on its own, with the same matcher, and the comment names the missing ones, followed by the calls that were made, e.g. `Missing: get_order_details. Called: check_return_eligibility(order_id=2670).`
@@ -227,8 +229,8 @@ The primary quality metrics. None of them needs a reference, so they run on ever
 - **Uncalibrated until section 6 is done:** reported next to the reference-based metrics, and gating nothing. `step_count` stays the exact number next to the `trajectory_efficiency` verdict.
 
 **How 3a is built.**
-- `TrajectoryJudgeEvaluator` (`evals/evaluators/trajectory_judge.py`) subclasses `LLMJudgeEvaluator` and overrides two hooks: `_make_judge` builds openevals `create_trajectory_llm_as_judge(prompt=..., judge=..., feedback_key=key)`, and `_verdict` reads its `{key, score, comment}` as a `JudgeVerdict`. Each metric is a three-line subclass in its own module (`key`, `prompt_version = "v1"`).
-- **The contract** comes from `agent_contract(repo)` (`evals/contract.py`): the rendered system prompt (`render_system_prompt`) followed by each tool's name, description and model-facing parameters (`convert_to_openai_tool` over `build_tools(repo)`, so the injected `runtime` never appears). The factory builds it once per experiment and gives it to every trajectory judge.
+- `TrajectoryJudgeEvaluator` (`evals/evaluators/judges/trajectory_judge.py`) subclasses `LLMJudgeEvaluator` and overrides two hooks: `_make_judge` builds openevals `create_trajectory_llm_as_judge(prompt=..., judge=..., feedback_key=key)`, and `_verdict` reads its `{key, score, comment}` as a `JudgeVerdict`. Each metric is a three-line subclass in its own module (`key`, `prompt_version = "v1"`).
+- **The contract** comes from `agent_contract(repo)` (`evals/evaluators/judges/contract.py`): the rendered system prompt (`render_system_prompt`) followed by each tool's name, description and model-facing parameters (`convert_to_openai_tool` over `build_tools(repo)`, so the injected `runtime` never appears). The factory builds it once per experiment and gives it to every trajectory judge.
 - **The judge receives** `today`, `contract` and `outputs` (this turn's messages); openevals formats the turn into the `{outputs}` placeholder. The turn starts with the question, so there is no separate question variable. Each rubric says the customer was verified before the turn, because the seeded verification exchange is left out of it.
 - **Rubrics,** each narrow and naming what it does *not* judge (`argument_quality` is at v2, the others at v1):
   - `tool_selection`: every tool the contract requires was called before answering, none was misused, dependent calls come after what they need; asking instead of calling passes when the request was ambiguous.
@@ -335,11 +337,14 @@ evals/
 ├── datasets/m1/             # dataset.yaml, P.yaml, L.yaml: hand-written cases
 ├── sync.py                  # repo → LangSmith upsert
 ├── target.py                # AgentTarget, seed_verified_thread, verified_history
-├── prompts.py               # versioned judge prompts
-├── contract.py              # agent_contract(): system prompt and tool schemas for the judges
-├── evaluators/              # base.py (Evaluator), llm_judge.py (LLMJudgeEvaluator), trajectory.py
-│                            # (TrajectoryMatchEvaluator), trajectory_judge.py (TrajectoryJudgeEvaluator),
-│                            # messages.py (turn readers), factory.py, one module per metric
+├── evaluators/              # grouped by grader type; base.py (Evaluator, error policy), factory.py,
+│   │                        # messages.py (turn readers); one module per metric
+│   ├── code/                # trajectory_match.py (TrajectoryMatchEvaluator), tool_correctness,
+│   │                        # argument_correctness, reason_code, step_count
+│   └── judges/              # llm_judge.py (LLMJudgeEvaluator), trajectory_judge.py
+│                            # (TrajectoryJudgeEvaluator), prompts.py (versioned judge prompts),
+│                            # contract.py (agent_contract), answer_correctness, tool_selection,
+│                            # argument_quality, trajectory_efficiency
 ├── run.py                   # client.evaluate() entrypoint
 ├── report.py                # pass rate, pass^k, flaky, measures, latency; attaches experiment feedback
 └── calibrate.py             # (step 3, not yet) judge agreement with labels

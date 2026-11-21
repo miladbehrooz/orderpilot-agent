@@ -1,6 +1,6 @@
 """Tool correctness: were all expected tools called, whatever their arguments?"""
 
-from evals.evaluators.trajectory import TrajectoryMatchEvaluator
+from evals.evaluators.code.trajectory_match import TrajectoryMatchEvaluator
 
 
 class ToolCorrectnessEvaluator(TrajectoryMatchEvaluator):

@@ -7,19 +7,19 @@ the metric's name, and register it in ``_REGISTRY``.
 from collections.abc import Sequence
 from typing import ClassVar
 
-from evals.contract import agent_contract
 from evals.errors import EvalSetupError
-from evals.evaluators.answer_correctness import AnswerCorrectnessEvaluator
-from evals.evaluators.argument_correctness import ArgumentCorrectnessEvaluator
-from evals.evaluators.argument_quality import ArgumentQualityEvaluator
 from evals.evaluators.base import Evaluator
-from evals.evaluators.llm_judge import LLMJudgeEvaluator
-from evals.evaluators.reason_code import ReasonCodeEvaluator
-from evals.evaluators.step_count import StepCountEvaluator
-from evals.evaluators.tool_correctness import ToolCorrectnessEvaluator
-from evals.evaluators.tool_selection import ToolSelectionEvaluator
-from evals.evaluators.trajectory_efficiency import TrajectoryEfficiencyEvaluator
-from evals.evaluators.trajectory_judge import TrajectoryJudgeEvaluator
+from evals.evaluators.code.argument_correctness import ArgumentCorrectnessEvaluator
+from evals.evaluators.code.reason_code import ReasonCodeEvaluator
+from evals.evaluators.code.step_count import StepCountEvaluator
+from evals.evaluators.code.tool_correctness import ToolCorrectnessEvaluator
+from evals.evaluators.judges.answer_correctness import AnswerCorrectnessEvaluator
+from evals.evaluators.judges.argument_quality import ArgumentQualityEvaluator
+from evals.evaluators.judges.contract import agent_contract
+from evals.evaluators.judges.llm_judge import LLMJudgeEvaluator
+from evals.evaluators.judges.tool_selection import ToolSelectionEvaluator
+from evals.evaluators.judges.trajectory_efficiency import TrajectoryEfficiencyEvaluator
+from evals.evaluators.judges.trajectory_judge import TrajectoryJudgeEvaluator
 from evals.judge import build_judge
 from orderpilot.repository import OrderRepository
 
