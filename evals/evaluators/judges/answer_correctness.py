@@ -5,7 +5,7 @@ import json
 from langsmith.evaluation.evaluator import EvaluationResult
 from langsmith.schemas import Example, Run
 
-from evals.evaluators.llm_judge import LLMJudgeEvaluator
+from evals.evaluators.judges.llm_judge import LLMJudgeEvaluator
 
 
 class AnswerCorrectnessEvaluator(LLMJudgeEvaluator):

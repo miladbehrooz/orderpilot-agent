@@ -10,7 +10,7 @@ from openevals.llm import create_llm_as_judge
 from pydantic import BaseModel, Field
 
 from evals.evaluators.base import Evaluator
-from evals.prompts import prompt_for
+from evals.evaluators.judges.prompts import prompt_for
 
 
 class JudgeVerdict(BaseModel):

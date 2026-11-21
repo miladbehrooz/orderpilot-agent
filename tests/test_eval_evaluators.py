@@ -42,9 +42,9 @@ from evals.evaluators import (
     TrajectoryMatchEvaluator,
 )
 from evals.evaluators import factory as factory_module
-from evals.evaluators import llm_judge as llm_judge_module
-from evals.evaluators import trajectory_judge as trajectory_judge_module
-from evals.prompts import JUDGE_PROMPTS, JudgePrompt, prompt_for
+from evals.evaluators.judges import llm_judge as llm_judge_module
+from evals.evaluators.judges import trajectory_judge as trajectory_judge_module
+from evals.evaluators.judges.prompts import JUDGE_PROMPTS, JudgePrompt, prompt_for
 from tests.stubs import StubRepository
 
 RunFactory = Callable[..., Run]

@@ -1,6 +1,6 @@
 """Argument quality: are the arguments supported by the conversation? A reference-free judge."""
 
-from evals.evaluators.trajectory_judge import TrajectoryJudgeEvaluator
+from evals.evaluators.judges.trajectory_judge import TrajectoryJudgeEvaluator
 
 
 class ArgumentQualityEvaluator(TrajectoryJudgeEvaluator):
