@@ -12,7 +12,7 @@ class ArgumentQualityEvaluator(TrajectoryJudgeEvaluator):
     """
 
     key = "argument_quality"
-    prompt_version = "v1"
+    prompt_version = "v2"
 
 
 __all__ = ["ArgumentQualityEvaluator"]

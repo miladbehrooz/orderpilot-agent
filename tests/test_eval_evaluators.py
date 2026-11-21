@@ -396,7 +396,7 @@ def test_factory_reports_judge_prompt_versions() -> None:
     assert EvaluatorFactory.prompt_versions(["tool_correctness", "argument_correctness"]) == {}
     assert EvaluatorFactory.prompt_versions(
         ["tool_selection", "argument_quality", "trajectory_efficiency"]
-    ) == {"tool_selection": "v1", "argument_quality": "v1", "trajectory_efficiency": "v1"}
+    ) == {"tool_selection": "v1", "argument_quality": "v2", "trajectory_efficiency": "v1"}
     assert EvaluatorFactory.metric_names() == [
         "answer_correctness",
         "tool_correctness",
@@ -975,7 +975,7 @@ def test_trajectory_judge_maps_score_and_comment(
     run = make_run(messages=turn(("check_return_eligibility", {"order_id": 7})))
     (result,) = _results(evaluator(run, make_example(metrics=[evaluator.key])))
     assert (result.key, result.score, result.comment) == (evaluator.key, verdict, "Checked.")
-    assert result.metadata == {"prompt_version": "v1"}
+    assert result.metadata == {"prompt_version": evaluator.prompt_version}
 
 
 @pytest.mark.parametrize("evaluator_cls", TRAJECTORY_JUDGES)

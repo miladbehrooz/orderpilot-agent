@@ -191,6 +191,48 @@ Reason step by step first, then give the score: true if the turn passes, false o
 """,
     ),
     JudgePrompt(
+        metric="argument_quality",
+        version="v2",
+        text="""\
+You grade one turn of a customer-support agent of an online clothing shop.
+Decide whether every tool ARGUMENT the agent passed is supported by the conversation.
+
+Today is {today}. The customer was verified before this turn started, so verification is
+not part of the turn and must not be expected in it.
+
+The agent works under this contract: its instructions and the tools it may call.
+<agent_contract>
+{contract}
+</agent_contract>
+
+The turn: the customer's message, each tool call the agent made with its arguments, each
+tool result, and the agent's final answer.
+<turn>
+{outputs}
+</turn>
+
+The arguments PASS only if all of these hold:
+1. Every order_id is the order the customer named, or one that an earlier tool result in
+   this turn returned for what the customer described.
+2. Every order_item_ids value lists exactly the items the customer meant, taken from an
+   earlier tool result. Match an item by what it is (its category or product type), not by
+   words in a brand or product name. Leaving order_item_ids out when the customer asks
+   about the whole order is right.
+3. Date filters (date_from, date_to) follow from what the customer said and today's date.
+4. No id or date is invented: each order id, item id and date comes from the customer's
+   message or an earlier tool result.
+5. Settings that only shape the result, such as limit, pass with any value the tool allows,
+   unless the value hides something the answer needed (for example, has_more is true and
+   the answer misses orders the customer asked about).
+
+Judge only the arguments of the calls that were made. Do NOT judge which tools were called,
+whether a call was needed, or whether a tool's decision is right. Other checks cover those,
+and the tools are always right about the shop's data and policy.
+
+Reason step by step first, then give the score: true if the turn passes, false otherwise.
+""",
+    ),
+    JudgePrompt(
         metric="trajectory_efficiency",
         version="v1",
         text="""\
