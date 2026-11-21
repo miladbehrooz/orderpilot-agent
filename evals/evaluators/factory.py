@@ -5,18 +5,23 @@ the metric's name, and register it in ``_REGISTRY``.
 """
 
 from collections.abc import Sequence
-from datetime import datetime
 from typing import ClassVar
 
+from evals.contract import agent_contract
 from evals.errors import EvalSetupError
 from evals.evaluators.answer_correctness import AnswerCorrectnessEvaluator
 from evals.evaluators.argument_correctness import ArgumentCorrectnessEvaluator
+from evals.evaluators.argument_quality import ArgumentQualityEvaluator
 from evals.evaluators.base import Evaluator
 from evals.evaluators.llm_judge import LLMJudgeEvaluator
 from evals.evaluators.reason_code import ReasonCodeEvaluator
 from evals.evaluators.step_count import StepCountEvaluator
 from evals.evaluators.tool_correctness import ToolCorrectnessEvaluator
+from evals.evaluators.tool_selection import ToolSelectionEvaluator
+from evals.evaluators.trajectory_efficiency import TrajectoryEfficiencyEvaluator
+from evals.evaluators.trajectory_judge import TrajectoryJudgeEvaluator
 from evals.judge import build_judge
+from orderpilot.repository import OrderRepository
 
 
 class EvaluatorFactory:
@@ -28,6 +33,9 @@ class EvaluatorFactory:
         ArgumentCorrectnessEvaluator.key: ArgumentCorrectnessEvaluator,
         ReasonCodeEvaluator.key: ReasonCodeEvaluator,
         StepCountEvaluator.key: StepCountEvaluator,
+        ToolSelectionEvaluator.key: ToolSelectionEvaluator,
+        ArgumentQualityEvaluator.key: ArgumentQualityEvaluator,
+        TrajectoryEfficiencyEvaluator.key: TrajectoryEfficiencyEvaluator,
     }
 
     @classmethod
@@ -74,15 +82,17 @@ class EvaluatorFactory:
         return evaluator_cls
 
     @classmethod
-    def build(cls, metrics: Sequence[str], reference_now: datetime) -> list[Evaluator]:
+    def build(cls, metrics: Sequence[str], repo: OrderRepository) -> list[Evaluator]:
         """Build the evaluator of each given metric.
 
         One judge model is built and shared, and only when a selected metric is an LLM
-        judge, so code-only runs need no judge configuration or API key.
+        judge, so code-only runs need no judge configuration or API key. The agent's
+        contract is built only when a trajectory judge is selected.
 
         Args:
             metrics: Metric names, in the order the evaluators should run.
-            reference_now: TODAY of the database under test, given to the LLM judges.
+            repo: Repository on the database under test: its TODAY goes to the LLM judges,
+                and its tools into the trajectory judges' contract.
 
         Returns:
             One evaluator per metric.
@@ -93,10 +103,15 @@ class EvaluatorFactory:
         """
         classes = [cls._lookup(name) for name in metrics]
         needs_judge = any(issubclass(c, LLMJudgeEvaluator) for c in classes)
+        needs_contract = any(issubclass(c, TrajectoryJudgeEvaluator) for c in classes)
         judge = build_judge() if needs_judge else None
+        contract = agent_contract(repo) if needs_contract else None
+        reference_now = repo.reference_now()
         evaluators: list[Evaluator] = []
         for evaluator_cls in classes:
-            if issubclass(evaluator_cls, LLMJudgeEvaluator) and judge is not None:
+            if issubclass(evaluator_cls, TrajectoryJudgeEvaluator) and judge and contract:
+                evaluators.append(evaluator_cls(judge, reference_now, contract))
+            elif issubclass(evaluator_cls, LLMJudgeEvaluator) and judge:
                 evaluators.append(evaluator_cls(judge, reference_now))
             else:
                 evaluators.append(evaluator_cls())

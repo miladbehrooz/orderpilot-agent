@@ -114,6 +114,159 @@ A wrong decision or a wrong fact makes the answer INCORRECT.
 Reason step by step first, then give the verdict.
 """,
     ),
+    JudgePrompt(
+        metric="tool_selection",
+        version="v1",
+        text="""\
+You grade one turn of a customer-support agent of an online clothing shop.
+Decide whether the agent called SUITABLE TOOLS for the customer's request.
+
+Today is {today}. The customer was verified before this turn started, so verification is
+not part of the turn and must not be expected in it.
+
+The agent works under this contract: its instructions and the tools it may call.
+<agent_contract>
+{contract}
+</agent_contract>
+
+The turn: the customer's message, each tool call the agent made with its arguments, each
+tool result, and the agent's final answer.
+<turn>
+{outputs}
+</turn>
+
+The tool selection PASSES only if all of these hold:
+1. Every tool the contract requires for this request was called before the agent answered.
+   For example: an eligibility tool before any "can" or "cannot" answer about cancelling or
+   returning; get_order_details before checking a single item of an order.
+2. No tool was used for something its description doesn't cover.
+3. A call that needs another call's result comes after that call.
+4. If the request was ambiguous and the contract says to ask, asking the customer instead of
+   calling a tool passes.
+
+Different sequences of calls can be equally valid: pass any that follows the contract.
+Do NOT judge the arguments, extra or repeated calls, or whether a tool's decision is right.
+Other checks cover those, and the tools are always right about the shop's data and policy.
+
+Reason step by step first, then give the score: true if the turn passes, false otherwise.
+""",
+    ),
+    JudgePrompt(
+        metric="argument_quality",
+        version="v1",
+        text="""\
+You grade one turn of a customer-support agent of an online clothing shop.
+Decide whether every tool ARGUMENT the agent passed is supported by the conversation.
+
+Today is {today}. The customer was verified before this turn started, so verification is
+not part of the turn and must not be expected in it.
+
+The agent works under this contract: its instructions and the tools it may call.
+<agent_contract>
+{contract}
+</agent_contract>
+
+The turn: the customer's message, each tool call the agent made with its arguments, each
+tool result, and the agent's final answer.
+<turn>
+{outputs}
+</turn>
+
+The arguments PASS only if all of these hold:
+1. Every order_id is the order the customer named, or one that an earlier tool result in
+   this turn returned for what the customer described.
+2. Every order_item_ids value lists exactly the items the customer meant, taken from an
+   earlier tool result. Match an item by what it is (its category or product type), not by
+   words in a brand or product name. Leaving order_item_ids out when the customer asks
+   about the whole order is right.
+3. Date filters (date_from, date_to) follow from what the customer said and today's date.
+4. No id, date or value is invented: each one comes from the customer's message or an
+   earlier tool result.
+
+Judge only the arguments of the calls that were made. Do NOT judge which tools were called,
+whether a call was needed, or whether a tool's decision is right. Other checks cover those,
+and the tools are always right about the shop's data and policy.
+
+Reason step by step first, then give the score: true if the turn passes, false otherwise.
+""",
+    ),
+    JudgePrompt(
+        metric="argument_quality",
+        version="v2",
+        text="""\
+You grade one turn of a customer-support agent of an online clothing shop.
+Decide whether every tool ARGUMENT the agent passed is supported by the conversation.
+
+Today is {today}. The customer was verified before this turn started, so verification is
+not part of the turn and must not be expected in it.
+
+The agent works under this contract: its instructions and the tools it may call.
+<agent_contract>
+{contract}
+</agent_contract>
+
+The turn: the customer's message, each tool call the agent made with its arguments, each
+tool result, and the agent's final answer.
+<turn>
+{outputs}
+</turn>
+
+The arguments PASS only if all of these hold:
+1. Every order_id is the order the customer named, or one that an earlier tool result in
+   this turn returned for what the customer described.
+2. Every order_item_ids value lists exactly the items the customer meant, taken from an
+   earlier tool result. Match an item by what it is (its category or product type), not by
+   words in a brand or product name. Leaving order_item_ids out when the customer asks
+   about the whole order is right.
+3. Date filters (date_from, date_to) follow from what the customer said and today's date.
+4. No id or date is invented: each order id, item id and date comes from the customer's
+   message or an earlier tool result.
+5. Settings that only shape the result, such as limit, pass with any value the tool allows,
+   unless the value hides something the answer needed (for example, has_more is true and
+   the answer misses orders the customer asked about).
+
+Judge only the arguments of the calls that were made. Do NOT judge which tools were called,
+whether a call was needed, or whether a tool's decision is right. Other checks cover those,
+and the tools are always right about the shop's data and policy.
+
+Reason step by step first, then give the score: true if the turn passes, false otherwise.
+""",
+    ),
+    JudgePrompt(
+        metric="trajectory_efficiency",
+        version="v1",
+        text="""\
+You grade one turn of a customer-support agent of an online clothing shop.
+Decide whether the agent's turn was EFFICIENT: free of needless tool calls.
+
+Today is {today}. The customer was verified before this turn started, so verification is
+not part of the turn and must not be expected in it.
+
+The agent works under this contract: its instructions and the tools it may call.
+<agent_contract>
+{contract}
+</agent_contract>
+
+The turn: the customer's message, each tool call the agent made with its arguments, each
+tool result, and the agent's final answer.
+<turn>
+{outputs}
+</turn>
+
+The turn PASSES only if all of these hold:
+1. Every call was needed: the final answer uses its result, or the contract requires it.
+   For example, get_order_details is needed before checking a single item of an order,
+   but not before checking eligibility for a whole order the customer named.
+2. No call repeats an earlier call with the same arguments.
+
+These are not waste: a retry with corrected arguments after an error or NOT_FOUND result,
+and a lookup the contract requires. A turn with no tool calls passes this check.
+Do NOT judge which tools were called, the arguments, or whether a tool's decision is right.
+Other checks cover those, and the tools are always right about the shop's data and policy.
+
+Reason step by step first, then give the score: true if the turn passes, false otherwise.
+""",
+    ),
 )
 
 

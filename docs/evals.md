@@ -1,6 +1,6 @@
 # E-commerce Support Agent: Evaluation Design (v2)
 
-_2026-11-21. Derived from `scenarios.md` and `tools.md`. Steps 1 and 2 (sections 1–5, 7–9: `answer_correctness`, `tool_correctness`, `argument_correctness`, `reason_code`, `step_count`) are implemented. v2 changes the strategy to a hybrid one (principle 1): reference-free LLM judges become the primary quality metrics, and the hand-written references are kept for regression and judge calibration. The reference-free judges (section 3), their calibration (section 6) and later steps are not implemented yet._
+_2026-11-21. Derived from `scenarios.md` and `tools.md`. Steps 1 and 2 (sections 1–5, 7–9: `answer_correctness`, `tool_correctness`, `argument_correctness`, `reason_code`, `step_count`) and step 3a (the trajectory judges `tool_selection`, `argument_quality`, `trajectory_efficiency`) are implemented. v2 changes the strategy to a hybrid one (principle 1): reference-free LLM judges become the primary quality metrics, and the hand-written references are kept for regression and judge calibration. Judge calibration (section 6, step 3b), the answer judges (step 3c) and later steps are not implemented yet._
 
 ## Principles
 1. **Hybrid grading: three kinds of check, each where it fits.**
@@ -136,6 +136,13 @@ class LLMJudgeEvaluator(Evaluator):  # llm_judge.py: holds the judge; prompt loo
     prompt_version: ClassVar[str]
 
     def __init__(self, judge: BaseChatModel, reference_now: datetime) -> None: ...
+    def _make_judge(self, judge, prompt): ...  # default: openevals create_llm_as_judge
+    def _verdict(self, raw) -> JudgeVerdict: ...  # reads that judge's output
+
+
+class TrajectoryJudgeEvaluator(LLMJudgeEvaluator):  # trajectory_judge.py: reference-free
+    def __init__(self, judge, reference_now, contract: str) -> None: ...
+    def _make_judge(self, judge, prompt): ...  # openevals create_trajectory_llm_as_judge
 
 
 class TrajectoryMatchEvaluator(Evaluator):  # trajectory.py: openevals superset trajectory match
@@ -153,16 +160,19 @@ class EvaluatorFactory:  # factory.py
         "argument_correctness": ArgumentCorrectnessEvaluator,
         "reason_code": ReasonCodeEvaluator,
         "step_count": StepCountEvaluator,
+        "tool_selection": ToolSelectionEvaluator,
+        "argument_quality": ArgumentQualityEvaluator,
+        "trajectory_efficiency": TrajectoryEfficiencyEvaluator,
     }
 
     @classmethod
-    def build(cls, names: Sequence[str]) -> list[Evaluator]: ...
+    def build(cls, names: Sequence[str], repo: OrderRepository) -> list[Evaluator]: ...
 ```
 
 - **Several metrics in one run.** `client.evaluate(evaluators=[...])` takes the factory's list, and each evaluator writes its own feedback key. An evaluator can also return several results at once, so one judge call can yield several sub-verdicts.
 - **Return shape: `EvaluationResults`, i.e. `{"results": [...]}`.** LangSmith rejects a bare list of `EvaluationResult` objects (it only accepts a list of dicts) and any empty result, but accepts an empty `results` list. That is how "not applicable" emits no feedback. A contract test runs our objects through LangSmith's `run_evaluator` to keep this true.
 - **Signature `(run, example)`.** LangSmith passes the `Run` and the `Example` when the parameters are named exactly that (it types `example` as optional). We need `run.error` for the error policy and `example.metadata` for applicability. LangSmith names evaluators by `__name__`, which objects lack, so the base class sets `self.__name__ = key`, and **every result sets `key` explicitly**.
-- **The judge is built only when needed.** The factory calls `build_judge()` only if a selected evaluator is an `LLMJudgeEvaluator`. Runs with only code-based metrics then work without an OpenAI key.
+- **The judge is built only when needed.** The factory calls `build_judge()` only if a selected evaluator is an `LLMJudgeEvaluator`, and `agent_contract(repo)` only if one is a `TrajectoryJudgeEvaluator`. Runs with only code-based metrics then work without an OpenAI key.
 - **Own base class, not LangSmith's `RunEvaluator`,** so LangSmith types stay in one adapter and a later move to Langfuse stays cheap.
 
 **Error policy** (in `Evaluator.__call__`, written once)
@@ -198,8 +208,8 @@ The step 1 and 2 metrics below are the **reference-based** ones: since v2 they s
 - **Shared turn readers** live in `evals/evaluators/messages.py` (`tool_calls`, `model_calls`, `tool_results`), used by the trajectory metrics too.
 - **Cases:** `reason_code` on P1–P8 (the L tools only return `OK`); `step_count` on every case.
 
-### Step 3 metrics (planned): reference-free judges
-The primary quality metrics. None of them needs a reference, so they run on every case, reference-based or not:
+### Step 3 metrics: reference-free judges
+The primary quality metrics. None of them needs a reference, so they run on every case, reference-based or not. **3a, done:** `tool_selection`, `argument_quality`, `trajectory_efficiency`. **3c, planned:** `task_completion`, `faithfulness`.
 
 | Metric | Question | Reads |
 |---|---|---|
@@ -213,8 +223,18 @@ The primary quality metrics. None of them needs a reference, so they run on ever
 - **Own rubrics, not the default prompts.** openevals' reference-free `TRAJECTORY_ACCURACY_PROMPT` guesses the goal and asks whether the steps "make logical sense" and are "relatively efficient". It knows no OrderPilot rule, so it would pass an agent that skips `check_return_eligibility` and works out the date itself. Each metric gets a versioned prompt in `JUDGE_PROMPTS`, like `answer_correctness`.
 - **More than one path can pass.** The rubric grades whether a path is reasonable within the contract, not whether it matches one golden path. An extra `get_order_details` before an eligibility check doesn't fail `tool_selection`; it fails `trajectory_efficiency` only if nothing in the answer needed it.
 - **Policy is not the judge's job.** Whether a decision is right for the data is settled by tool code and its unit tests. The judges check that the agent used the tools and reported their results faithfully.
-- **One verdict per metric,** each a `reasoning` and a pass/fail `verdict` under its own key, as `answer_correctness` does. Metrics that read the same input may share a judge call if it returns separate verdicts. Calibration decides whether a verdict needs a call of its own.
+- **One judge call and one verdict per metric,** each a `reasoning` and a pass/fail `verdict` under its own key, as `answer_correctness` does. Separate calls keep the verdicts independent for calibration, and match openevals' trajectory judge, which returns one score per call.
 - **Uncalibrated until section 6 is done:** reported next to the reference-based metrics, and gating nothing. `step_count` stays the exact number next to the `trajectory_efficiency` verdict.
+
+**How 3a is built.**
+- `TrajectoryJudgeEvaluator` (`evals/evaluators/trajectory_judge.py`) subclasses `LLMJudgeEvaluator` and overrides two hooks: `_make_judge` builds openevals `create_trajectory_llm_as_judge(prompt=..., judge=..., feedback_key=key)`, and `_verdict` reads its `{key, score, comment}` as a `JudgeVerdict`. Each metric is a three-line subclass in its own module (`key`, `prompt_version = "v1"`).
+- **The contract** comes from `agent_contract(repo)` (`evals/contract.py`): the rendered system prompt (`render_system_prompt`) followed by each tool's name, description and model-facing parameters (`convert_to_openai_tool` over `build_tools(repo)`, so the injected `runtime` never appears). The factory builds it once per experiment and gives it to every trajectory judge.
+- **The judge receives** `today`, `contract` and `outputs` (this turn's messages); openevals formats the turn into the `{outputs}` placeholder. The turn starts with the question, so there is no separate question variable. Each rubric says the customer was verified before the turn, because the seeded verification exchange is left out of it.
+- **Rubrics,** each narrow and naming what it does *not* judge (`argument_quality` is at v2, the others at v1):
+  - `tool_selection`: every tool the contract requires was called before answering, none was misused, dependent calls come after what they need; asking instead of calling passes when the request was ambiguous.
+  - `argument_quality`: each `order_id` and `order_item_ids` comes from the customer's message or an earlier tool result, items matched by what they are; date filters follow from today; no id or date invented. Settings that only shape the result, such as `limit`, pass with any value the tool allows unless they hide something the answer needed. v1 also required `limit` to come from the conversation, which failed L1-01's `limit=5` in 2 of 3 runs on `claude-haiku-5-5-full-3897d8a5`; v2, graded locally on the same 42 stored runs, changed only those two verdicts (to pass).
+  - `trajectory_efficiency`: every call was needed by the answer or required by the contract, and no call repeats an earlier one; a retry with corrected arguments is not waste.
+- **Cases:** all m1 cases (P and L) list the three metrics. A full run of 14 cases × 3 repeats makes 168 judge calls (with `answer_correctness`).
 
 ## 4. Orchestration: `run.py`
 ```bash
@@ -295,7 +315,8 @@ Tests live in `tests/`, use pytest-mock, and never call a real LLM:
 - **`AnswerCorrectnessEvaluator`:** the judge is mocked; checks the mapping from judge output to result, and that expected tool calls never reach the judge.
 - **Trajectory metrics:** the real openevals matcher on hand-built OpenAI-format turns: missing, extra and reordered calls, wrong and extra arguments, strict values, the comment.
 - **`reason_code` and `step_count`:** expected and other codes, the last result after a retry, other tools' results ignored, no result, unreadable content; tool and model calls counted; no measure on an errored run.
-- **Reference-free judges** (step 3, planned): the judge is mocked; checks that it sees the turn and the contract but no reference or metadata, and that each metric gets its own result.
+- **Trajectory judges** (step 3a): openevals' trajectory judge is mocked; checks that the judge receives exactly `today`, `contract` and the turn and nothing from the reference or metadata, the score and comment mapping, the shared error policy, that every v1 prompt fills, the LangSmith contract, and that the factory builds the contract once, only for trajectory judges.
+- **`agent_contract`** (no mocks): it holds the rendered system prompt and every tool with its parameters, and no injected `runtime`.
 - **Dataset checks:** unknown metrics, missing required reference fields, unknown tools and arguments (including injected ones such as `runtime`), unknown reason codes and reason codes from unknown tools are refused.
 - **Target:** only this turn's messages are returned.
 - **Report maths:** pass rate, pass^k, pass@k and flaky detection on hand-built rows; measures routed by kind, summarised per scenario, kept out of pass rates and gates.
@@ -315,9 +336,10 @@ evals/
 ├── sync.py                  # repo → LangSmith upsert
 ├── target.py                # AgentTarget, seed_verified_thread, verified_history
 ├── prompts.py               # versioned judge prompts
+├── contract.py              # agent_contract(): system prompt and tool schemas for the judges
 ├── evaluators/              # base.py (Evaluator), llm_judge.py (LLMJudgeEvaluator), trajectory.py
-│                            # (TrajectoryMatchEvaluator), messages.py (turn readers), factory.py,
-│                            # one module per metric
+│                            # (TrajectoryMatchEvaluator), trajectory_judge.py (TrajectoryJudgeEvaluator),
+│                            # messages.py (turn readers), factory.py, one module per metric
 ├── run.py                   # client.evaluate() entrypoint
 ├── report.py                # pass rate, pass^k, flaky, measures, latency; attaches experiment feedback
 └── calibrate.py             # (step 3, not yet) judge agreement with labels
@@ -331,7 +353,7 @@ The full list of planned metrics, grouped by dimension, is in [`metrics.md`](met
 |---|---|
 | **1** | Pipeline end to end, `answer_correctness`, report (P plus L1, L3, L5, L6). Done |
 | **2** | Reference-based trajectory and decisions (code): `tool_correctness`, `argument_correctness` (openevals trajectory match), `reason_code`, and the reference-free `step_count` (measure). Done |
-| 3 | Reference-free judges and calibration: `task_completion`, `faithfulness`, `tool_selection`, `argument_quality`, `trajectory_efficiency` (section 3), run next to the reference-based metrics on m1; calibration of every judge, `answer_correctness` included (section 6: annotation queue, built failures, `calibrate.py`, judge datasets); optional references in the case schema |
+| 3 | Reference-free judges and calibration, run next to the reference-based metrics on m1 (section 3). **3a, done:** `tool_selection`, `argument_quality`, `trajectory_efficiency` and the agent's contract. **3b:** calibration of every judge, `answer_correctness` included (section 6: built failures, annotation queue, `calibrate.py`, judge datasets). **3c:** `task_completion`, `faithfulness` |
 | 4 | Code invariants and behaviour: leak scan and the other gates (`kind="gate"`), `grounded_facts`; clarification and refusal rubrics (AM, L2, S); AU with unverified starts. New cases are reference-free unless a regression case is needed |
 | 5 | Multi-turn: openevals simulated user (AU3, AM1 follow-ups), graded by the reference-free judges over the whole conversation |
 | M2 | DB-state grading on a fresh DB copy per example (W1–W8) |
@@ -356,7 +378,7 @@ The full list of planned metrics, grouped by dimension, is in [`metrics.md`](met
   - Extra keyword arguments fill the prompt template (`prompt.format(**kwargs)`).
   - LLM errors are not caught, hence our own error policy.
   - It also ships the trajectory matchers and trajectory judge (`openevals.trajectory`).
-  - `create_trajectory_llm_as_judge(prompt=..., judge=..., feedback_key=..., few_shot_examples=..., system=...)` (checked 2026-11-21) formats the turn as text and returns one `{key, score, comment}` per call. It has no `output_schema`, so a call grades one metric. Its default prompt needs a reference (`TRAJECTORY_ACCURACY_PROMPT_WITH_REFERENCE`); the reference-free one is `TRAJECTORY_ACCURACY_PROMPT`.
+  - `create_trajectory_llm_as_judge(prompt=..., judge=..., feedback_key=..., few_shot_examples=..., system=...)` (checked 2026-11-21) formats the turn as text and returns one `{key, score, comment}` per call. It has no `output_schema`, so a call grades one metric. Its default prompt needs a reference (`TRAJECTORY_ACCURACY_PROMPT_WITH_REFERENCE`); the reference-free one is `TRAJECTORY_ACCURACY_PROMPT`. Extra keyword arguments fill the prompt template, like `create_llm_as_judge`. The turn is formatted as `<assistant>` blocks with `<tool_call>` name and arguments and `<tool>` blocks with `<tool_result>` id and content: the calls carry no id, so parallel calls can't be paired with their results by the judge (rare in OrderPilot, which calls one tool at a time).
   - `create_trajectory_match_evaluator(...)` is called with `outputs=` and `reference_outputs=` (OpenAI-format message lists; tool calls as `{"function": {"name", "arguments"}}` or `{"name", "args"}`) and returns `{"key": "trajectory_<mode>_match", "score": bool, "comment": None}`. Each call is `@traceable`, so it shows as a child trace of the evaluator.
   - `superset` mode: each reference call is matched to its own output call with the same name; args mode `superset` means the output args contain every reference key with an equal value.
 - **agentevals 0.0.9 (2025-07-24):** no release in 16 months, and its trajectory matchers are now in openevals, so it is not used.
@@ -365,5 +387,4 @@ The full list of planned metrics, grouped by dimension, is in [`metrics.md`](met
 - k and concurrency defaults, once the cost per run is known.
 - What judge–human agreement (κ) counts as "acceptable" before a judge metric gates anything.
 - Whether a calibrated `faithfulness` judge should become a gate next to the code check `grounded_facts`, or stay a score.
-- How many judge calls a run may cost: one per metric, or shared calls with several verdicts (section 3).
 - **Outside the evals:** `Command(update=...)` and `threads.update_state` on the LangGraph server can set `user_id` directly, and `langgraph.json` has no auth. Rule 2 holds for the `input` path only. This needs a decision before any deployment (e.g. LangGraph custom auth).

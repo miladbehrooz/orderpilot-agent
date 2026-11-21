@@ -4,7 +4,14 @@
 defaults:
   splits: [full]
   metrics:
-    [answer_correctness, tool_correctness, argument_correctness, reason_code, step_count]
+    - answer_correctness
+    - tool_correctness
+    - argument_correctness
+    - reason_code
+    - step_count
+    - tool_selection
+    - argument_quality
+    - trajectory_efficiency
 
 cases:
   - case_id: P1-01
