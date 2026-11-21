@@ -55,11 +55,22 @@ in practice: on the same questions many times, against known correct answers.
   an order, …). Each case has a reference answer, key facts and the expected tool calls.
 - **Metrics**, each answering one question:
 
-  | Metric                 | Question                               | Grader                                    |
-  | ---------------------- | -------------------------------------- | ----------------------------------------- |
-  | `answer_correctness`   | Is the final answer right?             | LLM judge (OpenAI), against the reference |
-  | `tool_correctness`     | Did the agent call the expected tools? | Code: openevals trajectory match          |
-  | `argument_correctness` | With the expected arguments?           | Code: openevals trajectory match          |
+  | Metric                 | Question                                         | Grader                                    |
+  | ---------------------- | ------------------------------------------------ | ----------------------------------------- |
+  | `answer_correctness`   | Is the final answer right?                       | LLM judge (OpenAI), against the reference |
+  | `tool_correctness`     | Did the agent call the expected tools?           | Code: openevals trajectory match          |
+  | `argument_correctness` | With the expected arguments?                     | Code: openevals trajectory match          |
+  | `reason_code`          | Did the eligibility tool return the right code?  | Code, against the reference               |
+  | `step_count`           | How many tool calls did it take?                 | Code, reported as a number                |
+
+- **Where it is going: hybrid grading.** The metrics above compare against hand-written
+  references, which are slow to write. Next come **reference-free LLM judges** that read
+  the whole run (tool calls and results included) and grade task completion, tool
+  selection, arguments, efficiency and faithfulness to the tool results, without a golden
+  trajectory. Rules that must never break (authentication, one customer never seeing
+  another's data) stay **code checks**. The hand-written cases are kept as regression tests
+  and as labels to calibrate the judges. See [docs/evals.md](docs/evals.md) and
+  [docs/metrics.md](docs/metrics.md).
 
 - **Reliability, not luck:** every case runs *k* times. The report shows the pass rate,
   **pass^k** (every run passed) and **pass@k** (at least one passed) per scenario, plus
@@ -163,13 +174,12 @@ uv run pre-commit install                       # run the checks on every commit
 - [x] Read-only tools: verify customer, list orders, order details, cancellation and return eligibility
 - [x] Single-agent LangGraph loop with an auth gate and lockout
 - [x] Terminal chat, LangGraph Studio and Agent Chat UI; LangSmith tracing
-- [x] Eval harness on LangSmith: `answer_correctness`, `tool_correctness`, `argument_correctness`; pass^k / pass@k report
+- [x] Eval harness on LangSmith: `answer_correctness`, `tool_correctness`, `argument_correctness`, `reason_code`, `step_count`; pass^k / pass@k report
 
 **Next: evaluation**
-- [ ] `reason_code` and `step_count` metrics
-- [ ] Calibrate the LLM judge against human labels (agreement, κ) before it gates anything
-- [ ] Safety gates: no data leaks, no internal IDs, auth before data, prompt-injection cases
-- [ ] Groundedness: every claim in the answer backed by a tool output
+- [ ] Reference-free LLM judges: task completion, tool selection, argument quality, efficiency, faithfulness to tool results
+- [ ] Calibrate every judge (agreement, κ) on the hand-written cases, failing runs built on purpose and human labels, before it gates anything
+- [ ] Safety gates in code: no data leaks, no internal IDs, auth before data, prompt-injection cases
 - [ ] Multi-turn conversations with a simulated customer
 - [ ] Smoke evals in CI on every pull request
 
@@ -182,7 +192,7 @@ uv run pre-commit install                       # run the checks on every commit
 ## Known limitations
 - The data is synthetic and the eval set is still small (14 cases). Results are a signal,
   not a benchmark.
-- The `answer_correctness` judge is not yet calibrated against human labels.
+- The LLM judges are not yet calibrated against human labels.
 - The local LangGraph server has no authentication, so it is for local use only.
 
 

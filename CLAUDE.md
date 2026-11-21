@@ -16,7 +16,7 @@ If code and docs disagree, ask before changing either.
 - Python 3.11+, LangChain + LangGraph, SQLite (stdlib `sqlite3`)
 - LangChain/LangGraph APIs change often: check the current docs before using an API, don't rely on memory.
 - Keep dependencies minimal.
-- Evals: LangSmith runs them (datasets, experiments); metrics are our own evaluator classes, using openevals for the generic parts (LLM-as-judge; trajectory match in `openevals.trajectory`). Judge model on OpenAI via `LLMFactory`. See `docs/evals.md`.
+- Evals: LangSmith runs them (datasets, experiments); metrics are our own evaluator classes, using openevals for the generic parts (LLM-as-judge; trajectory match and trajectory judge in `openevals.trajectory`). Hybrid strategy: reference-free judges are the primary quality metrics, code invariants are the gates, and hand-written references are kept for regression and judge calibration. Judge model on OpenAI via `LLMFactory`. See `docs/evals.md`.
 
 ## Non-negotiable design rules
 1. **Business rules and date maths live in tool code**, never only in prompts. Tools return a decision, a `reason_code` and the supporting numbers; the LLM only explains them.
