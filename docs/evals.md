@@ -132,7 +132,9 @@ class Evaluator(ABC):  # base.py: the policy every metric shares
     def evaluate(self, run: Run, example: Example) -> list[EvaluationResult]: ...
 
 
-class LLMJudgeEvaluator(Evaluator):  # judges/llm_judge.py: holds the judge; prompt looked up by version
+class LLMJudgeEvaluator(
+    Evaluator
+):  # judges/llm_judge.py: holds the judge; prompt looked up by version
     prompt_version: ClassVar[str]
 
     def __init__(self, judge: BaseChatModel, reference_now: datetime) -> None: ...
