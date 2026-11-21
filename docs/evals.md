@@ -1,6 +1,6 @@
 # E-commerce Support Agent: Evaluation Design (v1)
 
-_2026-11-17. Derived from `scenarios.md` and `tools.md`. Step 1 (sections 1–5, 7–9) and the first part of step 2 (`tool_correctness`, `argument_correctness`) are implemented; judge calibration (section 6) and later steps are not._
+_2026-11-18. Derived from `scenarios.md` and `tools.md`. Steps 1 and 2 (sections 1–5, 7–9: `answer_correctness`, `tool_correctness`, `argument_correctness`, `reason_code`, `step_count`) are implemented; judge calibration (section 6) and later steps are not._
 
 ## Principles
 1. **Grade with code first, then state, then an LLM judge.** Tools return a `reason_code` and the supporting numbers, so most behaviour can be checked by code. An LLM judge is used only where meaning matters: whether the answer is correct, whether it asked a clarifying question, whether it refused.
@@ -30,8 +30,9 @@ evals/datasets/m1/*.yaml ──sync.py──▶ LangSmith dataset "orderpilot-m1
         ▼                                         ▼                                      ▼
  Target (per example)                    Evaluators (per run)                    Report (per experiment)
  seed a verified thread                  answer_correctness (judge)              pass rate, pass^k, pass@k
- invoke(question)                        tool_correctness, argument_correctness  per scenario; flaky cases;
- → {answer, messages}                    (code); later: reason codes, leak gate, evaluator errors; latency, cost
+ invoke(question)                        tool_correctness, argument_correctness, per scenario; flaky cases;
+ → {answer, messages}                    reason_code (code); step_count          measures (mean, p50, p95);
+                                         (measure); later: leak gate,            evaluator errors; latency
                                          groundedness, DB state
                                                   │
                                 annotation queue → human labels → judge calibration
@@ -55,10 +56,11 @@ evals/datasets/m1/*.yaml ──sync.py──▶ LangSmith dataset "orderpilot-m1
     key_facts: {order_id: 5110, delivered_on: "2026-09-28", days_since_delivery: 45}
     expected_tool_calls:         # for tool_correctness / argument_correctness
       - {name: check_return_eligibility, args: {order_id: 5110}}   # args: required subset; omit for "any"
-  metrics: [answer_correctness, tool_correctness, argument_correctness]   # usually in the file's defaults
+    expected_reason_code: {tool: check_return_eligibility, code: WINDOW_EXPIRED}   # for reason_code
+  metrics: [answer_correctness, tool_correctness, argument_correctness, reason_code, step_count]   # usually in the file's defaults
   notes: "Far past the window."
 ```
-**Checks before upload** (`sync.check_dataset`, also run by `test_repo_datasets_are_valid`): every metric is registered; every case fills the reference fields its metrics need (`Evaluator.required_reference`, e.g. `expected_tool_calls`); and every expected tool call names a real tool and only arguments the model can set, read from the tools' model-facing schemas (`build_tools`), so a typo such as `orderid` fails before anything is uploaded.
+**Checks before upload** (`sync.check_dataset`, also run by `test_repo_datasets_are_valid`): every metric is registered; every case fills the reference fields its metrics need (`Evaluator.required_reference`, e.g. `expected_tool_calls`); every expected tool call names a real tool and only arguments the model can set, read from the tools' model-facing schemas (`build_tools`), so a typo such as `orderid` fails before anything is uploaded; and every expected reason code names a real tool. The code itself is typed as `ReasonCode`, so a misspelt code already fails when the case is loaded.
 
 The customer is identified by email, which the target looks up with `OrderRepository.find_user_by_email`, so no internal id goes into the dataset and the repository needs no eval-only method.
 
@@ -103,7 +105,7 @@ Evaluators are objects, built by a factory that works like `LLMFactory`.
 ```python
 class Evaluator(ABC):  # base.py: the policy every metric shares
     key: ClassVar[str]
-    kind: ClassVar[Literal["gate", "score"]] = "score"
+    kind: ClassVar[Literal["gate", "score", "measure"]] = "score"
     required_reference: ClassVar[tuple[str, ...]] = ()  # Reference fields sync requires
 
     def __call__(self, run: Run, example: Example | None) -> EvaluationResults:
@@ -132,6 +134,8 @@ class EvaluatorFactory:  # factory.py
         "answer_correctness": AnswerCorrectnessEvaluator,
         "tool_correctness": ToolCorrectnessEvaluator,
         "argument_correctness": ArgumentCorrectnessEvaluator,
+        "reason_code": ReasonCodeEvaluator,
+        "step_count": StepCountEvaluator,
     }
 
     @classmethod
@@ -149,7 +153,7 @@ class EvaluatorFactory:  # factory.py
 | Situation | Result |
 |---|---|
 | Metric doesn't apply to this case (not in the case's `metrics`) | An empty `results` list: no feedback, so averages are not diluted |
-| The agent run errored (exception, recursion limit) | The metric scores `False`, with the error as its comment |
+| The agent run errored (exception, recursion limit) | The metric scores `False`, with the error as its comment. A `measure` emits nothing: a crashed run has nothing meaningful to measure, and it already fails every pass/fail metric |
 | The evaluator or judge failed (API error, unparsable output) | No score for the metric; an `evaluator_error` result is emitted instead (metric key in its metadata), so "the judge broke" is never counted as "the agent failed" |
 
 ### Step 1 metric: `answer_correctness`
@@ -168,6 +172,13 @@ class EvaluatorFactory:  # factory.py
 - **Two metrics instead of one,** so the report separates "wrong tool" from "right tool, wrong order".
 - **Cases:** all of P and L1, L3, L5, L6. P8 expects `get_order_details` and then `check_return_eligibility` with `order_item_ids: [3862]`, following the agent prompt; checking all items or skipping the lookup fails `argument_correctness` / `tool_correctness` by design.
 
+### Step 2 metrics: `reason_code`, `step_count`
+- **`reason_code`** (`ReasonCodeEvaluator`, code, score): the case's `expected_reason_code` names a tool and the code it must return. The tool's **last** result in the turn is graded, so a retry after a wrong order id (`NOT_FOUND`, then the right order) is judged on the check the agent finally explains. Results are matched to their tool through `tool_call_id` and the AI message's call, not the tool message's optional `name`. A result whose content has no readable `reason_code` fails the metric (the tool contract is broken; that is not an evaluator error). The comment gives the actual code and, on a failure, the expected one: `check_return_eligibility returned ELIGIBLE, expected WINDOW_EXPIRED.`
+- **Hand-written, like every reference.** The codes come from `tools.md`, never from `policy.py`, so the metric checks the decision that reached the agent on the real DB build end to end. Its sharpest cases are the day-30/31 boundaries (P3-02, P4-02). It does **not** catch P8's item selection: checking both items of order 2670 also gives `ELIGIBLE`, so that stays `argument_correctness`'s job.
+- **`step_count`** (`StepCountEvaluator`, code, `kind="measure"`): the number of tool calls in the turn; the comment adds the model calls (`2 tool calls in 3 model calls.`). A measure is a number, never pass/fail: the report gives its mean and percentiles, and it never fails a gate.
+- **Shared turn readers** live in `evals/evaluators/messages.py` (`tool_calls`, `model_calls`, `tool_results`), used by the trajectory metrics too.
+- **Cases:** `reason_code` on P1–P8 (the L tools only return `OK`); `step_count` on every case.
+
 ## 4. Orchestration: `run.py`
 ```bash
 uv run python -m evals.sync --dataset m1 [--prune]       # repo YAML → LangSmith
@@ -182,7 +193,7 @@ EVAL_REPEATS=5 uv run python -m evals.run --split full
 - **Re-grading without re-running the agent:** `client.evaluate("<experiment id>", evaluators=[...])` scores an existing experiment's stored outputs. Use it after a judge prompt change, or to add a new metric to old runs.
 
 ## 5. Reporting: `report.py`
-After each run, a local summary is built from the result rows (`run`, `example`, `evaluation_results`) that `client.evaluate` returns. Repetitions share an example ID, so they are grouped by it. Runs where a metric didn't apply, or whose evaluator failed, don't count for that metric.
+After each run, a local summary is built from the result rows (`run`, `example`, `evaluation_results`) that `client.evaluate` returns. Repetitions share an example ID, so they are grouped by it. Runs where a metric didn't apply, or whose evaluator failed, don't count for that metric. Results are read by their evaluator's `kind`: a `measure` keeps its number, everything else is pass/fail.
 
 | Per scenario and metric | Definition |
 |---|---|
@@ -193,9 +204,13 @@ After each run, a local summary is built from the result rows (`run`, `example`,
 | evaluator errors | Count of `evaluator_error` results |
 | latency | p50/p95 per run, from the runs' start and end times |
 
-Gate metrics fail the experiment if any run fails a gate.
+| Per scenario and measure | Definition |
+|---|---|
+| mean, p50, p95, max | Over the measured runs; percentiles by nearest rank |
 
-pass^k is computed locally because LangSmith summary evaluators receive runs and examples, but **not** the per-run feedback. The overall numbers are then attached to the experiment as experiment-level feedback (`client.create_feedback(None, "<metric>:pass^k", score=..., project_id=<experiment id>)`, likewise `:pass_rate` and `:pass@k`), so they show up in the LangSmith UI too.
+Gate metrics fail the experiment if any run fails a gate. Measures never do.
+
+pass^k is computed locally because LangSmith summary evaluators receive runs and examples, but **not** the per-run feedback. The overall numbers are then attached to the experiment as experiment-level feedback (`client.create_feedback(None, "<metric>:pass^k", score=..., project_id=<experiment id>)`, likewise `:pass_rate` and `:pass@k`, and `<measure>:mean` and `<measure>:p95` for each measure), so they show up in the LangSmith UI too.
 
 ## 6. Judge calibration
 1. Send the first experiments to a LangSmith **annotation queue** and label 30–50 runs by hand, under the separate key `answer_correctness_human`.
@@ -224,9 +239,10 @@ Tests live in `tests/`, use pytest-mock, and never call a real LLM:
 - **`Evaluator.__call__`:** not-applicable emits nothing; an errored run scores `False`; a judge failure emits `evaluator_error`; keys are always set.
 - **`AnswerCorrectnessEvaluator`:** the judge is mocked; checks the mapping from judge output to result, and that expected tool calls never reach the judge.
 - **Trajectory metrics:** the real openevals matcher on hand-built OpenAI-format turns: missing, extra and reordered calls, wrong and extra arguments, strict values, the comment.
-- **Dataset checks:** unknown metrics, missing required reference fields, unknown tools and arguments (including injected ones such as `runtime`) are refused.
+- **`reason_code` and `step_count`:** expected and other codes, the last result after a retry, other tools' results ignored, no result, unreadable content; tool and model calls counted; no measure on an errored run.
+- **Dataset checks:** unknown metrics, missing required reference fields, unknown tools and arguments (including injected ones such as `runtime`), unknown reason codes and reason codes from unknown tools are refused.
 - **Target:** only this turn's messages are returned.
-- **Report maths:** pass rate, pass^k, pass@k and flaky detection on hand-built rows.
+- **Report maths:** pass rate, pass^k, pass@k and flaky detection on hand-built rows; measures routed by kind, summarised per scenario, kept out of pass rates and gates.
 - **LangSmith contract:** our evaluator objects run through LangSmith's `run_evaluator`, including the empty not-applicable result.
 - **Sync and run:** LangSmith `Client` mocked with autospec: create vs update by stable id, pruning, DB-build refusals, `evaluate()` arguments and metadata.
 - **The committed dataset:** `evals/datasets/m1` loads and every scenario has a smoke case.
@@ -244,9 +260,10 @@ evals/
 ├── target.py                # AgentTarget, seed_verified_thread, verified_history
 ├── prompts.py               # versioned judge prompts
 ├── evaluators/              # base.py (Evaluator), llm_judge.py (LLMJudgeEvaluator), trajectory.py
-│                            # (TrajectoryMatchEvaluator), factory.py, one module per metric
+│                            # (TrajectoryMatchEvaluator), messages.py (turn readers), factory.py,
+│                            # one module per metric
 ├── run.py                   # client.evaluate() entrypoint
-├── report.py                # pass rate, pass^k, flaky, latency; attaches experiment feedback
+├── report.py                # pass rate, pass^k, flaky, measures, latency; attaches experiment feedback
 └── calibrate.py             # (step 1b, not yet) judge vs human agreement
 ```
 **Dependencies:** the `evals` dependency group (`langsmith`, `openevals`, `pyyaml`, `types-PyYAML`), installed by default. These are declared explicitly even where they arrive indirectly. Step 2 needs no new dependency: trajectory match is in `openevals.trajectory`.
@@ -258,7 +275,7 @@ The full list of planned metrics, grouped by dimension, is in [`metrics.md`](met
 |---|---|
 | **1** | Pipeline end to end, `answer_correctness`, report (P plus L1, L3, L5, L6). Done |
 | 1b | Judge calibration: annotation queue, `calibrate.py`, judge dataset |
-| 2 | Trajectory (code, openevals trajectory match): `tool_correctness` and `argument_correctness` done; `reason_code` and `step_count` next |
+| **2** | Trajectory and decisions (code): `tool_correctness`, `argument_correctness` (openevals trajectory match), `reason_code`, `step_count` (measure). Done |
 | 3 | Gates and behaviour: leak scan (`kind="gate"`), clarification and refusal rubrics (AM, L2, S), AU with unverified starts |
 | 4 | Groundedness: claims in the answer against tool outputs in the trajectory |
 | 5 | Multi-turn: openevals simulated user (AU3, AM1 follow-ups) |

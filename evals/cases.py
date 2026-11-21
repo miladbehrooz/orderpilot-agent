@@ -20,6 +20,7 @@ from langsmith.schemas import ExampleCreate
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationError
 
 from evals.errors import EvalSetupError
+from orderpilot.services.results import ReasonCode
 
 Split = Literal["smoke", "full"]
 """Neutral subsets of a dataset: ``smoke`` (one case per scenario) and ``full``."""
@@ -55,6 +56,22 @@ class ToolCallSpec(BaseModel):
     args: dict[str, Any] = Field(default_factory=dict)
 
 
+class ExpectedReasonCode(BaseModel):
+    """The reason code one tool must return in the turn.
+
+    Attributes:
+        tool: Tool name, e.g. ``check_return_eligibility``. ``sync`` checks it against the
+            real tools.
+        code: Expected ``reason_code`` of the tool's last result in the turn. An unknown
+            code fails when the case is loaded.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    tool: str = Field(pattern=r"^[a-z_]+$")
+    code: ReasonCode
+
+
 class Reference(BaseModel):
     """The hand-written expected result, seen only by the evaluators.
 
@@ -63,6 +80,8 @@ class Reference(BaseModel):
         key_facts: Facts a correct answer may state (ids, dates, amounts, day counts).
         expected_tool_calls: Tool calls the turn must contain, for the trajectory metrics.
             The answer judge never sees them.
+        expected_reason_code: The reason code an eligibility tool must return, for the
+            ``reason_code`` metric.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -70,6 +89,7 @@ class Reference(BaseModel):
     expected_outcome: str
     key_facts: dict[str, Any] = Field(default_factory=dict)
     expected_tool_calls: list[ToolCallSpec] = Field(default_factory=list)
+    expected_reason_code: ExpectedReasonCode | None = None
 
 
 class EvalCase(BaseModel):
@@ -128,7 +148,8 @@ class EvalCase(BaseModel):
             {
                 "id": self.example_id,
                 "inputs": self.inputs.model_dump(),
-                "reference_outputs": self.reference.model_dump(),
+                # JSON mode, so the reason code uploads as a plain string.
+                "reference_outputs": self.reference.model_dump(mode="json"),
                 "split": list(self.splits),
                 "metadata": {
                     "case_id": self.case_id,
@@ -331,6 +352,7 @@ __all__ = [
     "CaseInputs",
     "EvalCase",
     "EvalDataset",
+    "ExpectedReasonCode",
     "Reference",
     "Split",
     "ToolCallSpec",

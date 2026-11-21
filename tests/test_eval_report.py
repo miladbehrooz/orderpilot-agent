@@ -1,4 +1,4 @@
-"""Experiment report: pass rate, pass^k, pass@k, flaky cases, gates and experiment feedback."""
+"""Experiment report: pass rate, pass^k, pass@k, flaky cases, gates, measures, feedback."""
 
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
@@ -10,6 +10,7 @@ from langsmith.schemas import Example, Run
 from pytest_mock import MockerFixture
 
 from evals.report import (
+    MeasureSummary,
     MetricSummary,
     ResultRow,
     ScoredRun,
@@ -145,12 +146,123 @@ def test_scored_runs_reads_langsmith_rows() -> None:
             ]
         },
     }
-    (scored,) = scored_runs([row])
+    (scored,) = scored_runs([row], kinds={"answer_correctness": "score"})
     assert scored.example_id == str(example.id)
     assert (scored.case_id, scored.scenario_id) == ("P4-01", "P4")
     assert scored.scores == {"answer_correctness": False}
     assert scored.evaluator_errors == 1
     assert scored.latency_s == 2.5
+
+
+def _measured(case_id: str, scenario_id: str, steps: list[float]) -> list[ScoredRun]:
+    """Return the repetitions of one case with a ``step_count`` measure and a passing score.
+
+    Args:
+        case_id: Case id; also used as the example id.
+        scenario_id: Scenario id.
+        steps: ``step_count`` per repetition.
+
+    Returns:
+        One scored run per value.
+    """
+    return [
+        ScoredRun(case_id, case_id, scenario_id, {"tool_correctness": True}, {"step_count": n})
+        for n in steps
+    ]
+
+
+@pytest.fixture
+def measured_runs() -> list[ScoredRun]:
+    """Return runs of two scenarios with step counts: P3 takes 1 step, P8 takes 2 to 4.
+
+    Returns:
+        The runs.
+    """
+    return [*_measured("P3-01", "P3", [1, 1]), *_measured("P8-01", "P8", [2, 2, 4])]
+
+
+def test_scored_runs_routes_measures_by_kind() -> None:
+    """A measure keeps its number; it is not read as pass/fail (3 steps is not "True")."""
+    example = Example.model_validate(
+        {"id": uuid4(), "metadata": {"case_id": "P8-01", "scenario_id": "P8"}}
+    )
+    run_id = uuid4()
+    run = Run.model_validate(
+        {
+            "id": run_id,
+            "trace_id": run_id,
+            "name": "invoke",
+            "run_type": "chain",
+            "start_time": datetime(2026, 11, 16, tzinfo=UTC),
+        }
+    )
+    row: ResultRow = {
+        "run": run,
+        "example": example,
+        "evaluation_results": {
+            "results": [
+                EvaluationResult(key="tool_correctness", score=True),
+                EvaluationResult(key="step_count", score=3),
+            ]
+        },
+    }
+    (scored,) = scored_runs([row], kinds={"tool_correctness": "score", "step_count": "measure"})
+    assert scored.scores == {"tool_correctness": True}
+    assert scored.measures == {"step_count": 3.0}
+
+
+def test_measures_summarized_per_scenario_and_overall(measured_runs: list[ScoredRun]) -> None:
+    """Each measure gets mean, nearest-rank p50/p95 and max per scenario and overall.
+
+    Args:
+        measured_runs: Runs with step counts.
+    """
+    report = summarize(measured_runs, kinds={"step_count": "measure"})
+    by_scenario = {m.scenario_id: m for m in report.measures}
+    assert by_scenario["P8"] == MeasureSummary("P8", "step_count", 3, 8 / 3, 2, 4, 4)
+    assert by_scenario[MetricSummary.OVERALL] == MeasureSummary(
+        MetricSummary.OVERALL, "step_count", 5, 2.0, 2, 4, 4
+    )
+
+
+def test_measures_never_enter_pass_rates_or_gates(measured_runs: list[ScoredRun]) -> None:
+    """Measures are reported apart: no pass rate and no gate, whatever their values.
+
+    Args:
+        measured_runs: Runs with step counts.
+    """
+    report = summarize(measured_runs, kinds={"step_count": "measure"})
+    assert {m.metric for m in report.metrics} == {"tool_correctness"}
+    assert not report.gate_failed
+
+
+def test_format_report_shows_measure_table(measured_runs: list[ScoredRun]) -> None:
+    """The text report has a measures table with the overall row of each measure.
+
+    Args:
+        measured_runs: Runs with step counts.
+    """
+    text = format_report(summarize(measured_runs, kinds={"step_count": "measure"}))
+    assert "measure" in text
+    overall = next(line for line in text.splitlines() if line.startswith("ALL") and "step" in line)
+    assert overall.split() == ["ALL", "step_count", "5", "2.0", "2", "4", "4"]
+
+
+def test_attach_to_experiment_writes_measure_feedback(
+    mocker: MockerFixture, measured_runs: list[ScoredRun]
+) -> None:
+    """Each measure's overall mean and p95 are attached to the experiment.
+
+    Args:
+        mocker: Pytest-mock fixture.
+        measured_runs: Runs with step counts.
+    """
+    client = mocker.create_autospec(Client, instance=True)
+    report = summarize(measured_runs, kinds={"step_count": "measure"})
+    attach_to_experiment(client, uuid4(), report)
+    scores = {c.args[1]: c.kwargs["score"] for c in client.create_feedback.call_args_list}
+    assert scores["step_count:mean"] == 2.0
+    assert scores["step_count:p95"] == 4
 
 
 def test_attach_to_experiment_writes_overall_feedback(

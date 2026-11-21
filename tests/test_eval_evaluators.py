@@ -1,10 +1,11 @@
-"""Evaluators: error policy, answer and trajectory metrics, the factory, the LangSmith contract.
+"""Evaluators: error policy, every metric, the factory, the LangSmith contract.
 
 The judge model is never called: ``create_llm_as_judge`` is mocked where the judge base
-class looks it up. The trajectory metrics run the real openevals matcher on hand-built turns.
+class looks it up. The code-graded metrics run on hand-built turns (the trajectory metrics with
+the real openevals matcher).
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
@@ -30,6 +31,8 @@ from evals.evaluators import (
     ArgumentCorrectnessEvaluator,
     EvaluatorFactory,
     JudgeVerdict,
+    ReasonCodeEvaluator,
+    StepCountEvaluator,
     ToolCorrectnessEvaluator,
     TrajectoryMatchEvaluator,
 )
@@ -87,12 +90,14 @@ def make_example() -> ExampleFactory:
     """Return a builder of dataset examples.
 
     Returns:
-        ``make_example(metrics=..., expected_tool_calls=...)`` building a real LangSmith
-        ``Example``.
+        ``make_example(metrics=..., expected_tool_calls=..., expected_reason_code=...)``
+        building a real LangSmith ``Example``.
     """
 
     def _make(
-        metrics: list[str] | None = None, expected_tool_calls: list[dict[str, Any]] | None = None
+        metrics: list[str] | None = None,
+        expected_tool_calls: list[dict[str, Any]] | None = None,
+        expected_reason_code: str = "ELIGIBLE",
     ) -> Example:
         """Build an example for a P3-style case.
 
@@ -100,6 +105,7 @@ def make_example() -> ExampleFactory:
             metrics: Metrics listed in the example metadata.
             expected_tool_calls: Expected calls as ``{"name", "args"}`` dicts; by default
                 one ``check_return_eligibility`` call for order 7.
+            expected_reason_code: Code ``check_return_eligibility`` must return.
 
         Returns:
             The example.
@@ -114,6 +120,10 @@ def make_example() -> ExampleFactory:
                     "expected_outcome": "Yes, returnable until 2026-12-04.",
                     "key_facts": {"order_id": 7, "return_deadline": "2026-12-04"},
                     "expected_tool_calls": expected_tool_calls,
+                    "expected_reason_code": {
+                        "tool": "check_return_eligibility",
+                        "code": expected_reason_code,
+                    },
                 },
                 "metadata": {
                     "case_id": "P3-01",
@@ -381,23 +391,30 @@ def test_factory_reports_judge_prompt_versions() -> None:
         "answer_correctness",
         "tool_correctness",
         "argument_correctness",
+        "reason_code",
+        "step_count",
     ]
 
 
-def turn(*calls: tuple[str, dict[str, Any]]) -> list[dict[str, Any]]:
+def turn(
+    *calls: tuple[str, dict[str, Any]], results: Sequence[str] | None = None
+) -> list[dict[str, Any]]:
     """Build one agent turn in OpenAI format, as the target returns it.
 
     Args:
         *calls: ``(tool name, args)`` of each tool call, one AI message per call.
+        results: Tool result content per call; ``{"reason_code": "OK"}`` for each if omitted.
 
     Returns:
         The question, each call with its tool result, and a final answer.
     """
+    contents = list(results) if results is not None else ['{"reason_code": "OK"}'] * len(calls)
     messages: list[AnyMessage] = [HumanMessage("Can I return order 2670?")]
-    for index, (name, args) in enumerate(calls):
+    for index, ((name, args), content) in enumerate(zip(calls, contents, strict=True)):
         call_id = f"call-{index}"
         messages.append(AIMessage("", tool_calls=[{"name": name, "args": args, "id": call_id}]))
-        messages.append(ToolMessage('{"reason_code": "OK"}', tool_call_id=call_id, name=name))
+        # No name on the tool message: results are matched to their call by tool_call_id.
+        messages.append(ToolMessage(content, tool_call_id=call_id))
     messages.append(AIMessage("Yes, you can."))
     return convert_to_openai_messages(messages)
 
@@ -611,16 +628,18 @@ def test_argument_correctness_allows_extra_and_unspecified_arguments(
     assert result.score is True
 
 
-@pytest.mark.parametrize("evaluator_cls", [ToolCorrectnessEvaluator, ArgumentCorrectnessEvaluator])
-def test_trajectory_metrics_follow_the_shared_policy(
-    evaluator_cls: type[TrajectoryMatchEvaluator],
+@pytest.mark.parametrize(
+    "evaluator_cls", [ToolCorrectnessEvaluator, ArgumentCorrectnessEvaluator, ReasonCodeEvaluator]
+)
+def test_code_metrics_follow_the_shared_policy(
+    evaluator_cls: type[TrajectoryMatchEvaluator | ReasonCodeEvaluator],
     make_run: RunFactory,
     make_example: ExampleFactory,
 ) -> None:
     """An errored run fails, and a case that doesn't list the metric gets no result.
 
     Args:
-        evaluator_cls: Trajectory evaluator under test.
+        evaluator_cls: Code-graded pass/fail evaluator under test.
         make_run: Run builder.
         make_example: Example builder.
     """
@@ -631,29 +650,41 @@ def test_trajectory_metrics_follow_the_shared_policy(
     assert _results(evaluator(make_run(), make_example())) == []
 
 
-@pytest.mark.parametrize("evaluator_cls", [ToolCorrectnessEvaluator, ArgumentCorrectnessEvaluator])
-def test_langsmith_accepts_trajectory_evaluator(
-    evaluator_cls: type[TrajectoryMatchEvaluator],
+@pytest.mark.parametrize(
+    ("evaluator_cls", "score"),
+    [
+        (ToolCorrectnessEvaluator, True),
+        (ArgumentCorrectnessEvaluator, True),
+        (ReasonCodeEvaluator, True),
+        (StepCountEvaluator, 1),
+    ],
+)
+def test_langsmith_accepts_code_evaluator(
+    evaluator_cls: type[TrajectoryMatchEvaluator | ReasonCodeEvaluator | StepCountEvaluator],
+    score: bool | int,
     make_run: RunFactory,
     make_example: ExampleFactory,
 ) -> None:
-    """Contract: LangSmith wraps a trajectory evaluator and keeps our key and score.
+    """Contract: LangSmith wraps a code-graded evaluator and keeps our key and score.
 
     Args:
-        evaluator_cls: Trajectory evaluator under test.
+        evaluator_cls: Code-graded evaluator under test.
+        score: The score expected for one eligible ``check_return_eligibility`` call.
         make_run: Run builder.
         make_example: Example builder.
     """
     evaluator = evaluator_cls()
-    run = make_run(messages=turn(("check_return_eligibility", {"order_id": 7})))
+    run = make_run(
+        messages=turn(
+            ("check_return_eligibility", {"order_id": 7}), results=['{"reason_code": "ELIGIBLE"}']
+        )
+    )
     output = run_evaluator(evaluator).evaluate_run(run, make_example(metrics=[evaluator.key]))
     (result,) = _results(output)
-    assert (result.key, result.score) == (evaluator.key, True)
+    assert (result.key, result.score) == (evaluator.key, score)
 
 
-def test_factory_builds_trajectory_metrics_without_judge(
-    mocker: MockerFixture, today: datetime
-) -> None:
+def test_factory_builds_code_metrics_without_judge(mocker: MockerFixture, today: datetime) -> None:
     """Code-only metrics build without a judge, so they need no judge key.
 
     Args:
@@ -661,8 +692,14 @@ def test_factory_builds_trajectory_metrics_without_judge(
         today: TODAY of the test shop.
     """
     build_judge = mocker.patch.object(factory_module, "build_judge", autospec=True)
-    built = EvaluatorFactory.build(["tool_correctness", "argument_correctness"], today)
-    assert [type(e) for e in built] == [ToolCorrectnessEvaluator, ArgumentCorrectnessEvaluator]
+    metrics = ["tool_correctness", "argument_correctness", "reason_code", "step_count"]
+    built = EvaluatorFactory.build(metrics, today)
+    assert [type(e) for e in built] == [
+        ToolCorrectnessEvaluator,
+        ArgumentCorrectnessEvaluator,
+        ReasonCodeEvaluator,
+        StepCountEvaluator,
+    ]
     build_judge.assert_not_called()
 
 
@@ -671,3 +708,180 @@ def test_required_reference_names_reference_fields() -> None:
     for name in EvaluatorFactory.metric_names():
         assert set(EvaluatorFactory.required_reference(name)) <= set(Reference.model_fields)
     assert EvaluatorFactory.required_reference("tool_correctness") == ("expected_tool_calls",)
+    assert EvaluatorFactory.required_reference("reason_code") == ("expected_reason_code",)
+
+
+def _grade_reason_code(
+    make_run: RunFactory,
+    make_example: ExampleFactory,
+    messages: list[dict[str, Any]],
+    expected: str = "ELIGIBLE",
+) -> Any:
+    """Grade one turn on ``reason_code`` and return its single result.
+
+    Args:
+        make_run: Run builder.
+        make_example: Example builder.
+        messages: The turn in OpenAI format.
+        expected: Code ``check_return_eligibility`` must return.
+
+    Returns:
+        The one ``EvaluationResult``.
+    """
+    evaluator = ReasonCodeEvaluator()
+    example = make_example(metrics=[evaluator.key], expected_reason_code=expected)
+    (result,) = _results(evaluator(make_run(messages=messages), example))
+    return result
+
+
+def _check(order_id: int = 4481) -> tuple[str, dict[str, Any]]:
+    """Return a ``check_return_eligibility`` call for one order.
+
+    Args:
+        order_id: The order checked.
+
+    Returns:
+        ``(tool name, args)`` for ``turn``.
+    """
+    return ("check_return_eligibility", {"order_id": order_id})
+
+
+def _code(code: str) -> str:
+    """Return tool result content with a reason code.
+
+    Args:
+        code: The reason code.
+
+    Returns:
+        The JSON content.
+    """
+    return f'{{"reason_code": "{code}", "order_id": 4481}}'
+
+
+def test_reason_code_passes_on_expected_code(
+    make_run: RunFactory, make_example: ExampleFactory
+) -> None:
+    """The expected code from the expected tool passes, and the comment names it.
+
+    Args:
+        make_run: Run builder.
+        make_example: Example builder.
+    """
+    messages = turn(_check(), results=[_code("WINDOW_EXPIRED")])
+    result = _grade_reason_code(make_run, make_example, messages, "WINDOW_EXPIRED")
+    assert (result.key, result.score) == ("reason_code", True)
+    assert result.comment == "check_return_eligibility returned WINDOW_EXPIRED."
+
+
+def test_reason_code_fails_on_other_code_and_names_both(
+    make_run: RunFactory, make_example: ExampleFactory
+) -> None:
+    """Day 31 reported as eligible fails, with the actual and the expected code.
+
+    Args:
+        make_run: Run builder.
+        make_example: Example builder.
+    """
+    messages = turn(_check(), results=[_code("ELIGIBLE")])
+    result = _grade_reason_code(make_run, make_example, messages, "WINDOW_EXPIRED")
+    assert result.score is False
+    assert result.comment == "check_return_eligibility returned ELIGIBLE, expected WINDOW_EXPIRED."
+
+
+def test_reason_code_grades_the_last_result_of_the_tool(
+    make_run: RunFactory, make_example: ExampleFactory
+) -> None:
+    """A retry after a wrong order id is graded on the final check.
+
+    Args:
+        make_run: Run builder.
+        make_example: Example builder.
+    """
+    messages = turn(_check(4418), _check(), results=[_code("NOT_FOUND"), _code("ELIGIBLE")])
+    result = _grade_reason_code(make_run, make_example, messages)
+    assert result.score is True
+    assert "(last of 2 results)" in result.comment
+
+
+def test_reason_code_ignores_results_of_other_tools(
+    make_run: RunFactory, make_example: ExampleFactory
+) -> None:
+    """Another tool's result, even with the right code, is never graded.
+
+    Args:
+        make_run: Run builder.
+        make_example: Example builder.
+    """
+    messages = turn(
+        _check(),
+        ("get_order_details", {"order_id": 4481}),
+        results=[_code("ELIGIBLE"), _code("OK")],
+    )
+    assert _grade_reason_code(make_run, make_example, messages).score is True
+    messages = turn(
+        ("check_cancellation_eligibility", {"order_id": 1}), results=[_code("ELIGIBLE")]
+    )
+    assert _grade_reason_code(make_run, make_example, messages).score is False
+
+
+def test_reason_code_fails_without_a_result_from_the_tool(
+    make_run: RunFactory, make_example: ExampleFactory
+) -> None:
+    """A turn that never called the tool fails and says so.
+
+    Args:
+        make_run: Run builder.
+        make_example: Example builder.
+    """
+    result = _grade_reason_code(make_run, make_example, turn())
+    assert result.score is False
+    assert result.comment == "No check_return_eligibility result."
+
+
+@pytest.mark.parametrize(
+    "content", ["Traceback (most recent call last)", "[]", '{"eligible": true}']
+)
+def test_reason_code_fails_on_unreadable_tool_content(
+    make_run: RunFactory, make_example: ExampleFactory, content: str
+) -> None:
+    """A result without a readable reason code fails the metric; it is not an evaluator error.
+
+    Args:
+        make_run: Run builder.
+        make_example: Example builder.
+        content: Tool result content that breaks the tool contract.
+    """
+    result = _grade_reason_code(make_run, make_example, turn(_check(), results=[content]))
+    assert (result.key, result.score) == ("reason_code", False)
+    assert "no readable reason_code" in result.comment
+
+
+def test_step_count_counts_tool_calls_and_model_calls(
+    make_run: RunFactory, make_example: ExampleFactory
+) -> None:
+    """The score is the number of tool calls; the comment adds the model calls.
+
+    Args:
+        make_run: Run builder.
+        make_example: Example builder.
+    """
+    evaluator = StepCountEvaluator()
+    messages = turn(("get_order_details", {"order_id": 2670}), _check(2670))
+    example = make_example(metrics=[evaluator.key])
+    (result,) = _results(evaluator(make_run(messages=messages), example))
+    assert (result.key, result.score) == ("step_count", 2)
+    assert result.comment == "2 tool calls in 3 model calls."
+
+
+def test_measure_emits_nothing_for_an_errored_run(
+    make_run: RunFactory, make_example: ExampleFactory
+) -> None:
+    """A crashed run has no step count: no result, rather than a misleading zero.
+
+    Args:
+        make_run: Run builder.
+        make_example: Example builder.
+    """
+    evaluator = StepCountEvaluator()
+    example = make_example(metrics=[evaluator.key])
+    assert _results(evaluator(make_run(error="GraphRecursionError"), example)) == []

@@ -119,6 +119,7 @@ def test_to_example_keeps_bookkeeping_out_of_inputs(dataset_path: Path) -> None:
         "expected_outcome": "No, outside the window",
         "key_facts": {"order_id": 1},
         "expected_tool_calls": [],
+        "expected_reason_code": None,
     }
     assert example.metadata is not None
     assert example.metadata["scenario_id"] == "P4"
@@ -229,6 +230,45 @@ def test_to_example_carries_expected_tool_calls() -> None:
         {"name": "list_my_orders", "args": {}},
         {"name": "get_order_details", "args": {"order_id": 1}},
     ]
+
+
+def _case_expecting_code(code: str) -> EvalCase:
+    """Return a P4-style case expecting a reason code from ``check_return_eligibility``.
+
+    Args:
+        code: The expected reason code, as written in YAML.
+
+    Returns:
+        The validated case.
+    """
+    return EvalCase.model_validate(
+        {
+            "case_id": "P4-01",
+            "scenario_id": "P4",
+            "splits": ["full"],
+            "metrics": ["reason_code"],
+            "inputs": {"customer_email": "e@example.com", "question": "?"},
+            "reference": {
+                "expected_outcome": "x",
+                "expected_reason_code": {"tool": "check_return_eligibility", "code": code},
+            },
+        }
+    )
+
+
+def test_unknown_reason_code_fails_at_load() -> None:
+    """A misspelt reason code fails validation instead of failing every run later."""
+    with pytest.raises(ValueError, match="WINDOW_EXPIRD"):
+        _case_expecting_code("WINDOW_EXPIRD")
+
+
+def test_to_example_uploads_reason_code_as_plain_string() -> None:
+    """The expected reason code reaches the reference outputs as plain JSON text."""
+    reference = _case_expecting_code("WINDOW_EXPIRED").to_example().reference_outputs
+    assert reference is not None
+    expected = reference["expected_reason_code"]
+    assert expected == {"tool": "check_return_eligibility", "code": "WINDOW_EXPIRED"}
+    assert type(expected["code"]) is str
 
 
 def test_repo_datasets_are_valid(stub_repo: StubRepository) -> None:

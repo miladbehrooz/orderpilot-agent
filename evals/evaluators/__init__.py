@@ -5,6 +5,8 @@ from evals.evaluators.argument_correctness import ArgumentCorrectnessEvaluator
 from evals.evaluators.base import Evaluator, EvaluatorKind
 from evals.evaluators.factory import EvaluatorFactory
 from evals.evaluators.llm_judge import JudgeVerdict, LLMJudgeEvaluator
+from evals.evaluators.reason_code import ReasonCodeEvaluator
+from evals.evaluators.step_count import StepCountEvaluator
 from evals.evaluators.tool_correctness import ToolCorrectnessEvaluator
 from evals.evaluators.trajectory import TrajectoryMatchEvaluator
 
@@ -16,6 +18,8 @@ __all__ = [
     "EvaluatorKind",
     "JudgeVerdict",
     "LLMJudgeEvaluator",
+    "ReasonCodeEvaluator",
+    "StepCountEvaluator",
     "ToolCorrectnessEvaluator",
     "TrajectoryMatchEvaluator",
 ]

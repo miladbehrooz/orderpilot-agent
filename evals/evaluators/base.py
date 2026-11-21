@@ -14,8 +14,10 @@ from langsmith.schemas import Example, Run
 
 from orderpilot.observability import logger
 
-EvaluatorKind = Literal["gate", "score"]
-"""``gate``: any failing run fails the experiment. ``score``: averaged quality metric."""
+EvaluatorKind = Literal["gate", "score", "measure"]
+"""``gate``: any failing run fails the experiment. ``score``: averaged pass/fail quality
+metric. ``measure``: a number (e.g. a step count) reported as mean and percentiles, never
+pass/fail."""
 
 
 class Evaluator(ABC):
@@ -24,7 +26,9 @@ class Evaluator(ABC):
     ``__call__`` is a template method holding the policy every metric shares:
 
     - a case whose ``metrics`` don't include this one gets no result (not applicable);
-    - a run that errored (exception, recursion limit) fails the metric;
+    - a run that errored (exception, recursion limit) fails the metric, or, for a
+      ``measure``, gets no result (a crashed run has nothing meaningful to measure, and it
+      already fails every pass/fail metric);
     - a failure inside the evaluator emits ``evaluator_error`` instead of a score, so a
       broken judge is never counted as a failing agent.
 
@@ -61,6 +65,8 @@ class Evaluator(ABC):
         if example is None or self.key not in (example.metadata or {}).get("metrics", []):
             return {"results": []}
         if run.error:
+            if self.kind == "measure":
+                return {"results": []}
             return {
                 "results": [
                     EvaluationResult(key=self.key, score=False, comment=f"Agent error: {run.error}")

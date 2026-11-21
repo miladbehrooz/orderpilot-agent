@@ -108,6 +108,29 @@ def check_expected_tool_calls(dataset: EvalDataset, tools: Sequence[BaseTool]) -
                 )
 
 
+def check_expected_reason_codes(dataset: EvalDataset, tools: Sequence[BaseTool]) -> None:
+    """Check that every expected reason code names a real tool.
+
+    Unknown codes are already refused when the case is loaded (``ReasonCode``).
+
+    Args:
+        dataset: The repo dataset.
+        tools: The agent's tools (``build_tools``).
+
+    Raises:
+        EvalSetupError: If a case expects a reason code from an unknown tool.
+    """
+    names = {tool.name for tool in tools}
+    for case in dataset.cases:
+        expected = case.reference.expected_reason_code
+        if expected is not None and expected.tool not in names:
+            valid = ", ".join(sorted(names))
+            raise EvalSetupError(
+                f"Case {case.case_id} expects a reason code from unknown tool "
+                f"{expected.tool!r}. Valid: {valid}"
+            )
+
+
 def check_dataset(dataset: EvalDataset, tools: Sequence[BaseTool]) -> None:
     """Run every repo-side check of a dataset before it is uploaded.
 
@@ -121,6 +144,7 @@ def check_dataset(dataset: EvalDataset, tools: Sequence[BaseTool]) -> None:
     check_metric_names(dataset)
     check_metric_references(dataset)
     check_expected_tool_calls(dataset, tools)
+    check_expected_reason_codes(dataset, tools)
 
 
 def _update(case: EvalCase) -> ExampleUpdate:
@@ -238,6 +262,7 @@ if __name__ == "__main__":
 __all__ = [
     "SyncSummary",
     "check_dataset",
+    "check_expected_reason_codes",
     "check_expected_tool_calls",
     "check_metric_names",
     "check_metric_references",
