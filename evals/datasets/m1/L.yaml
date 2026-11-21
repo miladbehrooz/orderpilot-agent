@@ -3,7 +3,14 @@
 # expected_tool_calls follow docs/tools.md and the agent prompt.
 defaults:
   splits: [full, smoke]
-  metrics: [answer_correctness, tool_correctness, argument_correctness, step_count]
+  metrics:
+    - answer_correctness
+    - tool_correctness
+    - argument_correctness
+    - step_count
+    - tool_selection
+    - argument_quality
+    - trajectory_efficiency
 
 cases:
   - case_id: L1-01

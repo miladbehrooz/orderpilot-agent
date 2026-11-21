@@ -14,7 +14,7 @@ class AnswerCorrectnessEvaluator(LLMJudgeEvaluator):
     An LLM judge compares the final answer with the reference outcome and key facts.
 
     The judge sees only the question, the answer and the reference. It never sees the tool
-    outputs (whether claims are backed by tools is a separate groundedness metric) or the
+    outputs (whether claims are backed by tools is the separate ``faithfulness`` metric) or the
     example metadata.
     """
 
@@ -38,14 +38,7 @@ class AnswerCorrectnessEvaluator(LLMJudgeEvaluator):
             expected_outcome=reference["expected_outcome"],
             key_facts=json.dumps(reference.get("key_facts", {}), ensure_ascii=False, indent=2),
         )
-        return [
-            EvaluationResult(
-                key=self.key,
-                score=verdict.verdict,
-                comment=verdict.reasoning,
-                metadata={"prompt_version": self.prompt_version},
-            )
-        ]
+        return [self._result(verdict)]
 
 
 __all__ = ["AnswerCorrectnessEvaluator"]

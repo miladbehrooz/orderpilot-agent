@@ -31,9 +31,9 @@ The groups are never merged into one number: a good outcome reached through a wa
 |---|---|---|---|---|
 | **Task completion** | Did the customer get what they asked for? | `task_completion` (judge); `task_success` (simulation, multi-turn) | `answer_correctness` (judge); `db_state_correct` (state, M2) | `answer_correctness` done |
 | **Faithfulness** | Do the answer's claims and decision follow the tool outputs? | `faithfulness` (judge); `grounded_facts` (code) | `reason_code` (code) | `reason_code` done |
-| **Tool selection** | Were suitable tools called, in a sensible order? | `tool_selection` (judge) | `tool_correctness` (code) | `tool_correctness` done |
-| **Argument correctness** | Are the arguments supported by the conversation? | `argument_quality` (judge) | `argument_correctness` (code) | `argument_correctness` done |
-| **Step efficiency** | Did it avoid needless steps? | `step_count` (code, measure); `trajectory_efficiency` (judge) | – | `step_count` done |
+| **Tool selection** | Were suitable tools called, in a sensible order? | `tool_selection` (judge) | `tool_correctness` (code) | both done |
+| **Argument correctness** | Are the arguments supported by the conversation? | `argument_quality` (judge) | `argument_correctness` (code) | both done |
+| **Step efficiency** | Did it avoid needless steps? | `step_count` (code, measure); `trajectory_efficiency` (judge) | – | both done |
 | **Safety and policy** | Did anything happen that must never happen? | `no_data_leak`, `no_internal_ids`, `auth_before_data`, `no_field_hint`, `lockout_reply`, `injection_resistance` (code gates) | – | step 4 |
 | **Conversation behaviour** | Did it behave well when the request was unclear or out of scope? | `asks_clarification`, `scope_redirect` (judge); `flags_stuck_or_lost` (code + judge) | – | step 4 |
 | **Write safety** (Milestone 2) | Did writes happen only when allowed and confirmed? | `no_write_without_confirmation`, `no_ineligible_write`, `exactly_one_ticket` (state) | – | M2 |
@@ -69,8 +69,8 @@ The groups are never merged into one number: a good outcome reached through a wa
 ### Tool selection and argument correctness
 | Metric | Question | Scenarios | Grader | Kind | Reference needed | Step |
 |---|---|---|---|---|---|---|
-| `tool_selection` | Were suitable tools called in a sensible order, and was none skipped that the answer relies on? | all | judge (whole turn and the agent's contract) | score | none | 3 |
-| `argument_quality` | Are the arguments supported by the conversation: the order and items the customer meant, no invented ids? | all | judge (whole turn) | score | none | 3 |
+| `tool_selection` | Were suitable tools called in a sensible order, and was none skipped that the answer relies on? | all | judge (whole turn and the agent's contract) | score | none | **done** (3a) |
+| `argument_quality` | Are the arguments supported by the conversation: the order and items the customer meant, no invented ids? | all | judge (whole turn and the agent's contract) | score | none | **done** (3a) |
 | `tool_correctness` | Were all expected tools called (by name)? | P, L (later Q) | code: openevals trajectory match, `superset`, arguments ignored | score | `expected_tool_calls` | **done** |
 | `argument_correctness` | Were they called with the expected key arguments (`order_id`, `order_item_ids`)? | P, L3 (L1, L5, L6 expect no arguments) | code: openevals trajectory match, `superset`, argument superset | score | `expected_tool_calls` with `args` | **done** |
 
@@ -87,7 +87,7 @@ The groups are never merged into one number: a good outcome reached through a wa
 | Metric | Question | Scenarios | Grader | Kind | Reference needed | Step |
 |---|---|---|---|---|---|---|
 | `step_count` | How many tool calls did the turn take? | all | code | measure (number, not pass/fail) | none | **done** |
-| `trajectory_efficiency` | Were redundant or unnecessary calls avoided? | all | judge (whole turn) | score | none | 3 |
+| `trajectory_efficiency` | Were redundant or unnecessary calls avoided? | all | judge (whole turn and the agent's contract) | score | none | **done** (3a) |
 
 - `step_count`: the score is the number of tool calls; the comment adds the model calls. Reported as mean, p50, p95 and max per scenario next to latency. A high `task_completion` with a high `step_count` means the agent works but needs optimising. A crashed run emits no step count; it already fails every pass/fail metric.
 - `trajectory_efficiency` says *whether* the extra steps were needed, which a count alone can't. The Sonnet run in the eval journal is the example to check it on: an order lookup on P4-01 that the answer didn't need.
@@ -141,7 +141,7 @@ OrderPilot is a single tool-calling loop with no explicit plan and one or two to
 |---|---|
 | 1 (done) | `answer_correctness`; reliability (pass^k, pass@k, flaky); latency |
 | 2 (done) | Reference-based: `tool_correctness`, `argument_correctness`, `reason_code`. Reference-free: `step_count` |
-| 3 | Reference-free judges: `task_completion`, `faithfulness`, `tool_selection`, `argument_quality`, `trajectory_efficiency`. Calibration of every judge, `answer_correctness` included: labels from the reference-based metrics, built failing turns and human review (TPR/TNR/κ, judge datasets, re-grading stability) |
+| 3 | Reference-free judges: `tool_selection`, `argument_quality`, `trajectory_efficiency` (3a, done); `task_completion`, `faithfulness` (3c). Calibration of every judge (3b), `answer_correctness` included: labels from the reference-based metrics, built failing turns and human review (TPR/TNR/κ, judge datasets, re-grading stability) |
 | 4 | Code gates: `no_data_leak`, `no_internal_ids`, `auth_before_data`, `lockout_reply`, `no_field_hint`, `injection_resistance`; `grounded_facts`; behaviour: `asks_clarification`, `scope_redirect`, `flags_stuck_or_lost`. New S, AU and Q cases, reference-free unless a regression case is needed |
 | 5 | `task_success` with a simulated customer (multi-turn); the reference-free judges over whole conversations |
 | M2 | `db_state_correct`, `no_write_without_confirmation`, `no_ineligible_write`, `exactly_one_ticket` |

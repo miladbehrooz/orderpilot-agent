@@ -55,20 +55,23 @@ in practice: on the same questions many times, against known correct answers.
   an order, …). Each case has a reference answer, key facts and the expected tool calls.
 - **Metrics**, each answering one question:
 
-  | Metric                 | Question                                         | Grader                                    |
-  | ---------------------- | ------------------------------------------------ | ----------------------------------------- |
-  | `answer_correctness`   | Is the final answer right?                       | LLM judge (OpenAI), against the reference |
-  | `tool_correctness`     | Did the agent call the expected tools?           | Code: openevals trajectory match          |
-  | `argument_correctness` | With the expected arguments?                     | Code: openevals trajectory match          |
-  | `reason_code`          | Did the eligibility tool return the right code?  | Code, against the reference               |
-  | `step_count`           | How many tool calls did it take?                 | Code, reported as a number                |
+  | Metric                  | Question                                         | Grader                                    |
+  | ----------------------- | ------------------------------------------------ | ----------------------------------------- |
+  | `answer_correctness`    | Is the final answer right?                       | LLM judge (OpenAI), against the reference |
+  | `tool_correctness`      | Did the agent call the expected tools?           | Code: openevals trajectory match          |
+  | `argument_correctness`  | With the expected arguments?                     | Code: openevals trajectory match          |
+  | `reason_code`           | Did the eligibility tool return the right code?  | Code, against the reference               |
+  | `step_count`            | How many tool calls did it take?                 | Code, reported as a number                |
+  | `tool_selection`        | Were suitable tools called, in a sensible order? | LLM judge (OpenAI), reference-free        |
+  | `argument_quality`      | Are the arguments the ones the customer meant?   | LLM judge (OpenAI), reference-free        |
+  | `trajectory_efficiency` | Were needless tool calls avoided?                | LLM judge (OpenAI), reference-free        |
 
-- **Where it is going: hybrid grading.** The metrics above compare against hand-written
-  references, which are slow to write. Next come **reference-free LLM judges** that read
-  the whole run (tool calls and results included) and grade task completion, tool
-  selection, arguments, efficiency and faithfulness to the tool results, without a golden
-  trajectory. Rules that must never break (authentication, one customer never seeing
-  another's data) stay **code checks**. The hand-written cases are kept as regression tests
+- **Hybrid grading.** The first four metrics compare against hand-written references,
+  which are slow to write. The **reference-free LLM judges** read the whole run (tool calls
+  and results included) and the agent's own rules, and grade it without a golden
+  trajectory: tool selection, arguments and efficiency now, task completion and
+  faithfulness to the tool results next. Rules that must never break (authentication, one
+  customer never seeing another's data) stay **code checks**. The hand-written cases are kept as regression tests
   and as labels to calibrate the judges. See [docs/evals.md](docs/evals.md) and
   [docs/metrics.md](docs/metrics.md).
 
@@ -177,7 +180,8 @@ uv run pre-commit install                       # run the checks on every commit
 - [x] Eval harness on LangSmith: `answer_correctness`, `tool_correctness`, `argument_correctness`, `reason_code`, `step_count`; pass^k / pass@k report
 
 **Next: evaluation**
-- [ ] Reference-free LLM judges: task completion, tool selection, argument quality, efficiency, faithfulness to tool results
+- [x] Reference-free LLM judges of the trajectory: tool selection, argument quality, efficiency
+- [ ] Reference-free LLM judges of the answer: task completion, faithfulness to tool results
 - [ ] Calibrate every judge (agreement, κ) on the hand-written cases, failing runs built on purpose and human labels, before it gates anything
 - [ ] Safety gates in code: no data leaks, no internal IDs, auth before data, prompt-injection cases
 - [ ] Multi-turn conversations with a simulated customer

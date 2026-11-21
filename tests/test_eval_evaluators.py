@@ -1,8 +1,9 @@
 """Evaluators: error policy, every metric, the factory, the LangSmith contract.
 
-The judge model is never called: ``create_llm_as_judge`` is mocked where the judge base
-class looks it up. The code-graded metrics run on hand-built turns (the trajectory metrics with
-the real openevals matcher).
+The judge model is never called: ``create_llm_as_judge`` and
+``create_trajectory_llm_as_judge`` are mocked where the judge base classes look them up.
+The code-graded metrics run on hand-built turns (the trajectory metrics with the real
+openevals matcher).
 """
 
 from collections.abc import Callable, Sequence
@@ -29,16 +30,22 @@ from evals.errors import EvalSetupError
 from evals.evaluators import (
     AnswerCorrectnessEvaluator,
     ArgumentCorrectnessEvaluator,
+    ArgumentQualityEvaluator,
     EvaluatorFactory,
     JudgeVerdict,
     ReasonCodeEvaluator,
     StepCountEvaluator,
     ToolCorrectnessEvaluator,
+    ToolSelectionEvaluator,
+    TrajectoryEfficiencyEvaluator,
+    TrajectoryJudgeEvaluator,
     TrajectoryMatchEvaluator,
 )
 from evals.evaluators import factory as factory_module
 from evals.evaluators import llm_judge as llm_judge_module
+from evals.evaluators import trajectory_judge as trajectory_judge_module
 from evals.prompts import JUDGE_PROMPTS, JudgePrompt, prompt_for
+from tests.stubs import StubRepository
 
 RunFactory = Callable[..., Run]
 ExampleFactory = Callable[..., Example]
@@ -351,48 +358,54 @@ def test_langsmith_accepts_not_applicable_result(
 
 
 def test_factory_builds_judge_only_when_needed(
-    mocker: MockerFixture, judge_fn: MockType, today: datetime
+    mocker: MockerFixture, judge_fn: MockType, stub_repo: StubRepository
 ) -> None:
     """The judge is built once for judge metrics, and never for an empty selection.
 
     Args:
         mocker: Pytest-mock fixture.
         judge_fn: The mocked judge callable (keeps the real judge out of the evaluator).
-        today: TODAY of the test shop.
+        stub_repo: Repository on the test shop.
     """
     build_judge = mocker.patch.object(factory_module, "build_judge", autospec=True)
     build_judge.return_value = mocker.create_autospec(BaseChatModel, instance=True)
 
-    assert EvaluatorFactory.build([], today) == []
+    assert EvaluatorFactory.build([], stub_repo) == []
     build_judge.assert_not_called()
 
-    (built,) = EvaluatorFactory.build(["answer_correctness"], today)
+    (built,) = EvaluatorFactory.build(["answer_correctness"], stub_repo)
     assert isinstance(built, AnswerCorrectnessEvaluator)
     assert built.__name__ == "answer_correctness"
     assert built.today == "2026-11-12"
     build_judge.assert_called_once_with()
 
 
-def test_factory_rejects_unknown_metric(today: datetime) -> None:
+def test_factory_rejects_unknown_metric(stub_repo: StubRepository) -> None:
     """An unknown metric name fails with the list of valid metric names.
 
     Args:
-        today: TODAY of the test shop.
+        stub_repo: Repository on the test shop.
     """
     with pytest.raises(EvalSetupError, match="answer_correctness"):
-        EvaluatorFactory.build(["answer_corectness"], today)
+        EvaluatorFactory.build(["answer_corectness"], stub_repo)
 
 
 def test_factory_reports_judge_prompt_versions() -> None:
     """Prompt versions of the selected judge metrics go into the experiment metadata."""
     assert EvaluatorFactory.prompt_versions(["answer_correctness"]) == {"answer_correctness": "v2"}
     assert EvaluatorFactory.prompt_versions(["tool_correctness", "argument_correctness"]) == {}
+    assert EvaluatorFactory.prompt_versions(
+        ["tool_selection", "argument_quality", "trajectory_efficiency"]
+    ) == {"tool_selection": "v1", "argument_quality": "v1", "trajectory_efficiency": "v1"}
     assert EvaluatorFactory.metric_names() == [
         "answer_correctness",
         "tool_correctness",
         "argument_correctness",
         "reason_code",
         "step_count",
+        "tool_selection",
+        "argument_quality",
+        "trajectory_efficiency",
     ]
 
 
@@ -684,16 +697,19 @@ def test_langsmith_accepts_code_evaluator(
     assert (result.key, result.score) == (evaluator.key, score)
 
 
-def test_factory_builds_code_metrics_without_judge(mocker: MockerFixture, today: datetime) -> None:
-    """Code-only metrics build without a judge, so they need no judge key.
+def test_factory_builds_code_metrics_without_judge(
+    mocker: MockerFixture, stub_repo: StubRepository
+) -> None:
+    """Code-only metrics build without a judge or a contract, so they need no judge key.
 
     Args:
         mocker: Pytest-mock fixture.
-        today: TODAY of the test shop.
+        stub_repo: Repository on the test shop.
     """
     build_judge = mocker.patch.object(factory_module, "build_judge", autospec=True)
+    contract = mocker.spy(factory_module, "agent_contract")
     metrics = ["tool_correctness", "argument_correctness", "reason_code", "step_count"]
-    built = EvaluatorFactory.build(metrics, today)
+    built = EvaluatorFactory.build(metrics, stub_repo)
     assert [type(e) for e in built] == [
         ToolCorrectnessEvaluator,
         ArgumentCorrectnessEvaluator,
@@ -701,6 +717,7 @@ def test_factory_builds_code_metrics_without_judge(mocker: MockerFixture, today:
         StepCountEvaluator,
     ]
     build_judge.assert_not_called()
+    contract.assert_not_called()
 
 
 def test_required_reference_names_reference_fields() -> None:
@@ -885,3 +902,197 @@ def test_measure_emits_nothing_for_an_errored_run(
     evaluator = StepCountEvaluator()
     example = make_example(metrics=[evaluator.key])
     assert _results(evaluator(make_run(error="GraphRecursionError"), example)) == []
+
+
+# Trajectory judges: reference-free, run by the openevals trajectory judge (mocked).
+
+TRAJECTORY_JUDGES = [
+    ToolSelectionEvaluator,
+    ArgumentQualityEvaluator,
+    TrajectoryEfficiencyEvaluator,
+]
+
+
+@pytest.fixture
+def trajectory_judge_fn(mocker: MockerFixture) -> MockType:
+    """Mock ``create_trajectory_llm_as_judge`` and return the judge function it builds.
+
+    Args:
+        mocker: Pytest-mock fixture.
+
+    Returns:
+        The mocked judge callable; it returns a passing openevals result unless changed.
+    """
+    create: MockType = mocker.patch.object(
+        trajectory_judge_module, "create_trajectory_llm_as_judge", autospec=True
+    )
+    judge: MockType = create.return_value
+    judge.return_value = {"key": "x", "score": True, "comment": "Called the eligibility tool."}
+    return judge
+
+
+def _trajectory_judge(
+    mocker: MockerFixture, evaluator_cls: type[TrajectoryJudgeEvaluator], today: datetime
+) -> TrajectoryJudgeEvaluator:
+    """Build a trajectory judge with a mocked judge model and a short contract.
+
+    Args:
+        mocker: Pytest-mock fixture.
+        evaluator_cls: Trajectory judge under test.
+        today: TODAY of the test shop.
+
+    Returns:
+        The evaluator.
+    """
+    model = mocker.create_autospec(BaseChatModel, instance=True)
+    return evaluator_cls(model, today, "CONTRACT: call an eligibility tool first.")
+
+
+@pytest.mark.parametrize("evaluator_cls", TRAJECTORY_JUDGES)
+@pytest.mark.parametrize("verdict", [True, False])
+def test_trajectory_judge_maps_score_and_comment(
+    mocker: MockerFixture,
+    trajectory_judge_fn: MockType,
+    make_run: RunFactory,
+    make_example: ExampleFactory,
+    today: datetime,
+    evaluator_cls: type[TrajectoryJudgeEvaluator],
+    verdict: bool,
+) -> None:
+    """The openevals score becomes the result's score, its comment the reasoning.
+
+    Args:
+        mocker: Pytest-mock fixture.
+        trajectory_judge_fn: The mocked judge callable.
+        make_run: Run builder.
+        make_example: Example builder.
+        today: TODAY of the test shop.
+        evaluator_cls: Trajectory judge under test.
+        verdict: The judge's verdict.
+    """
+    trajectory_judge_fn.return_value = {"key": "x", "score": verdict, "comment": "Checked."}
+    evaluator = _trajectory_judge(mocker, evaluator_cls, today)
+    run = make_run(messages=turn(("check_return_eligibility", {"order_id": 7})))
+    (result,) = _results(evaluator(run, make_example(metrics=[evaluator.key])))
+    assert (result.key, result.score, result.comment) == (evaluator.key, verdict, "Checked.")
+    assert result.metadata == {"prompt_version": "v1"}
+
+
+@pytest.mark.parametrize("evaluator_cls", TRAJECTORY_JUDGES)
+def test_trajectory_judge_sees_turn_and_contract_but_no_reference(
+    mocker: MockerFixture,
+    trajectory_judge_fn: MockType,
+    make_run: RunFactory,
+    make_example: ExampleFactory,
+    today: datetime,
+    evaluator_cls: type[TrajectoryJudgeEvaluator],
+) -> None:
+    """The judge gets today's date, the contract and the whole turn; never the reference.
+
+    Args:
+        mocker: Pytest-mock fixture.
+        trajectory_judge_fn: The mocked judge callable.
+        make_run: Run builder.
+        make_example: Example builder.
+        today: TODAY of the test shop.
+        evaluator_cls: Trajectory judge under test.
+    """
+    evaluator = _trajectory_judge(mocker, evaluator_cls, today)
+    messages = turn(("check_return_eligibility", {"order_id": 7}))
+    evaluator(make_run(messages=messages), make_example(metrics=[evaluator.key]))
+    kwargs = trajectory_judge_fn.call_args.kwargs
+    assert set(kwargs) == {"today", "outputs", "contract"}
+    assert kwargs["today"] == "2026-11-12"
+    assert kwargs["outputs"] == messages
+    assert kwargs["contract"] == "CONTRACT: call an eligibility tool first."
+    seen = str(kwargs)
+    assert all(hidden not in seen for hidden in ("2026-12-04", "P3-01", "expected"))
+
+
+@pytest.mark.parametrize("evaluator_cls", TRAJECTORY_JUDGES)
+def test_trajectory_judges_follow_the_shared_policy(
+    mocker: MockerFixture,
+    trajectory_judge_fn: MockType,
+    make_run: RunFactory,
+    make_example: ExampleFactory,
+    today: datetime,
+    evaluator_cls: type[TrajectoryJudgeEvaluator],
+) -> None:
+    """Not listed: no result; errored run: fails without a judge call; broken judge: error.
+
+    Args:
+        mocker: Pytest-mock fixture.
+        trajectory_judge_fn: The mocked judge callable.
+        make_run: Run builder.
+        make_example: Example builder.
+        today: TODAY of the test shop.
+        evaluator_cls: Trajectory judge under test.
+    """
+    evaluator = _trajectory_judge(mocker, evaluator_cls, today)
+    example = make_example(metrics=[evaluator.key])
+    assert _results(evaluator(make_run(), make_example())) == []
+    (failed,) = _results(evaluator(make_run(error="GraphRecursionError"), example))
+    assert (failed.key, failed.score) == (evaluator.key, False)
+    trajectory_judge_fn.assert_not_called()
+
+    trajectory_judge_fn.side_effect = TimeoutError("judge timed out")
+    (error,) = _results(evaluator(make_run(), example))
+    assert (error.key, error.metadata) == ("evaluator_error", {"metric": evaluator.key})
+
+
+@pytest.mark.parametrize("evaluator_cls", TRAJECTORY_JUDGES)
+def test_trajectory_judge_prompt_has_every_placeholder(
+    evaluator_cls: type[TrajectoryJudgeEvaluator],
+) -> None:
+    """Each trajectory prompt fills with exactly the variables the judge receives.
+
+    Args:
+        evaluator_cls: Trajectory judge under test.
+    """
+    prompt = prompt_for(evaluator_cls.key, evaluator_cls.prompt_version)
+    filled = prompt.format(today="2026-11-12", contract="RULES", outputs="TURN")
+    assert all(value in filled for value in ("2026-11-12", "RULES", "TURN"))
+
+
+def test_langsmith_accepts_trajectory_judge(
+    mocker: MockerFixture,
+    trajectory_judge_fn: MockType,
+    make_run: RunFactory,
+    make_example: ExampleFactory,
+    today: datetime,
+) -> None:
+    """Contract: LangSmith wraps a trajectory judge and keeps our key and score.
+
+    Args:
+        mocker: Pytest-mock fixture.
+        trajectory_judge_fn: The mocked judge callable.
+        make_run: Run builder.
+        make_example: Example builder.
+        today: TODAY of the test shop.
+    """
+    evaluator = _trajectory_judge(mocker, ToolSelectionEvaluator, today)
+    example = make_example(metrics=["tool_selection"])
+    (result,) = _results(run_evaluator(evaluator).evaluate_run(make_run(), example))
+    assert (result.key, result.score) == ("tool_selection", True)
+
+
+def test_factory_gives_trajectory_judges_the_contract(
+    mocker: MockerFixture, trajectory_judge_fn: MockType, stub_repo: StubRepository
+) -> None:
+    """The contract is built once from the repository and shared by the trajectory judges.
+
+    Args:
+        mocker: Pytest-mock fixture.
+        trajectory_judge_fn: The mocked judge callable (keeps the real judge out).
+        stub_repo: Repository on the test shop.
+    """
+    build_judge = mocker.patch.object(factory_module, "build_judge", autospec=True)
+    build_judge.return_value = mocker.create_autospec(BaseChatModel, instance=True)
+    contract = mocker.spy(factory_module, "agent_contract")
+    metrics = ["tool_selection", "argument_quality", "trajectory_efficiency", "step_count"]
+    built = EvaluatorFactory.build(metrics, stub_repo)
+    assert [type(e) for e in built] == [*TRAJECTORY_JUDGES, StepCountEvaluator]
+    contract.assert_called_once_with(stub_repo)
+    judges = [e for e in built if isinstance(e, TrajectoryJudgeEvaluator)]
+    assert all(e.contract == contract.spy_return and e.today == "2026-11-12" for e in judges)
+    build_judge.assert_called_once_with()
