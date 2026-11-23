@@ -37,7 +37,7 @@ The stuck/lost flags and day counts come from pure functions in `src/orderpilot/
 Both eligibility tools only check; they never change an order. Their decisions come from `cancel_decision` / `return_decision` in `src/orderpilot/policy.py`, which the Milestone 2 write tools re-run before writing (rule 7). There is no `explanation` text: the tools return codes and facts, and the LLM explains them.
 
 ### 4. `check_cancellation_eligibility(order_id)`
-- Returns `reason_code`, `eligible`, `order_id`, `status`, `created_on`, `shipped_on`, `delivered_on`.
+- Returns `reason_code`, `eligible`, `order_id`, `status`, `created_on`, `shipped_on`, `delivered_on`, and the same `days_in_status` and `is_stuck` / `is_possibly_lost` as the order summary, so the agent can flag a stuck or lost order without a second lookup.
 - Only Processing orders can be cancelled (a stuck one too). Codes by status:
 
   | Status | `reason_code` |
