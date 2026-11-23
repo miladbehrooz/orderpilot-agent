@@ -300,7 +300,7 @@ def test_factory_reports_judge_prompt_versions() -> None:
     assert EvaluatorFactory.prompt_versions(["tool_correctness", "argument_correctness"]) == {}
     assert EvaluatorFactory.prompt_versions(
         ["tool_selection", "argument_quality", "trajectory_efficiency"]
-    ) == {"tool_selection": "v1", "argument_quality": "v2", "trajectory_efficiency": "v1"}
+    ) == {"tool_selection": "v1", "argument_quality": "v2", "trajectory_efficiency": "v2"}
     assert EvaluatorFactory.metric_names() == [
         "answer_correctness",
         "tool_correctness",

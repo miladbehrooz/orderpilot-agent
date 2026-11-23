@@ -296,7 +296,9 @@ def _experiment(reference_now: str = "2026-11-12T00:00:00+00:00") -> StoredExper
     }
     turn = Turn("Can I return order 7?", "Yes, until 2026-12-04.", messages, reference)
     feedback = {"tool_correctness": 1.0, "argument_correctness": 1.0, "step_count": 1.0}
-    stored = StoredTurn(case_id="P3-01", run_id="0123456789", turn=turn, feedback=feedback)
+    stored = StoredTurn(
+        case_id="P3-01", run_id="019a1f08-0b2c-7d3e-8f40-a1b2c3d4e5f6", turn=turn, feedback=feedback
+    )
     return StoredExperiment(name="exp", reference_now=reference_now, turns=(stored,))
 
 
@@ -318,7 +320,7 @@ def test_labelled_items_are_silver_then_built(stub_repo: StubRepository) -> None
     """
     ids = [item.item_id for item in calibrate_module.labelled_items(_experiment(), stub_repo)]
     assert ids == [
-        "P3-01#01234567",
+        "P3-01#a1b2c3d4e5f6",
         "P3-01+drop_eligibility_call",
         "P3-01+swap_order_id",
         "P3-01+repeat_call",

@@ -24,7 +24,9 @@ class LabelledTurn:
     """A turn with the verdict each judge should give on it.
 
     Attributes:
-        item_id: Stable id: ``P4-01#<run id prefix>`` (silver) or ``P4-01+<mutation>`` (built).
+        item_id: Stable id: ``P4-01#<run id tail>`` (silver) or ``P4-01+<mutation>`` (built).
+            Run ids are UUIDv7, whose first digits are a timestamp shared by runs made
+            close together, so the silver id uses the random last 12 digits.
         case_id: Hand-written case id.
         source: Where the labels come from.
         turn: The turn to grade.
@@ -87,7 +89,7 @@ def silver_items(turns: Sequence[StoredTurn]) -> list[LabelledTurn]:
         if labels:
             items.append(
                 LabelledTurn(
-                    item_id=f"{stored.case_id}#{stored.run_id[:8]}",
+                    item_id=f"{stored.case_id}#{stored.run_id[-12:]}",
                     case_id=stored.case_id,
                     source="silver",
                     turn=stored.turn,

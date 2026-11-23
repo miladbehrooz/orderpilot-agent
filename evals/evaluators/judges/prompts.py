@@ -267,6 +267,48 @@ Other checks cover those, and the tools are always right about the shop's data a
 Reason step by step first, then give the score: true if the turn passes, false otherwise.
 """,
     ),
+    JudgePrompt(
+        metric="trajectory_efficiency",
+        version="v2",
+        text="""\
+You grade one turn of a customer-support agent of an online clothing shop.
+Decide whether the agent's turn was EFFICIENT: free of needless tool calls.
+
+Today is {today}. The customer was verified before this turn started, so verification is
+not part of the turn and must not be expected in it.
+
+The agent works under this contract: its instructions and the tools it may call.
+<agent_contract>
+{contract}
+</agent_contract>
+
+The turn: the customer's message, each tool call the agent made with its arguments, each
+tool result, and the agent's final answer.
+<turn>
+{outputs}
+</turn>
+
+The turn PASSES only if all of these hold:
+1. Every call was needed. A call is needed when it returned information that the
+   customer's request required and that no earlier result in this turn had already
+   returned, or when the contract requires it (for example, the contract asks the agent to
+   report something that only this tool returns). Using a result in the answer does not by
+   itself make a call needed: details the customer didn't ask for, such as item names,
+   prices or shipping dates, are no reason for a call, and neither is information another
+   tool already returned.
+   For example, get_order_details is needed before checking a single item of an order. It
+   is not needed before or after a return check of a whole order the customer named: the
+   return result already lists each item with its name and price.
+2. No call repeats an earlier call with the same arguments.
+
+These are not waste: a retry with corrected arguments after an error or NOT_FOUND result,
+and a lookup the contract requires. A turn with no tool calls passes this check.
+Do NOT judge which tools were called, the arguments, or whether a tool's decision is right.
+Other checks cover those, and the tools are always right about the shop's data and policy.
+
+Reason step by step first, then give the score: true if the turn passes, false otherwise.
+""",
+    ),
 )
 
 

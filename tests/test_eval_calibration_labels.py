@@ -14,6 +14,7 @@ def _stored(
     expected_calls: int = 1,
     calls: int = 1,
     case_id: str = "P3-01",
+    run_id: str = "019a1f08-0b2c-7d3e-8f40-a1b2c3d4e5f6",
 ) -> StoredTurn:
     """Build a stored run with the given feedback and number of tool calls.
 
@@ -22,6 +23,7 @@ def _stored(
         expected_calls: Number of expected tool calls in the reference.
         calls: Number of tool calls the turn makes.
         case_id: The run's case.
+        run_id: The run's id (a UUIDv7, as LangSmith gives).
 
     Returns:
         The stored run.
@@ -37,7 +39,7 @@ def _stored(
         ]
     messages.append({"role": "assistant", "content": "Yes."})
     turn = Turn("Can I return order 7?", "Yes.", tuple(messages), {"expected_tool_calls": expected})
-    return StoredTurn(case_id=case_id, run_id="0123456789abcdef", turn=turn, feedback=feedback)
+    return StoredTurn(case_id=case_id, run_id=run_id, turn=turn, feedback=feedback)
 
 
 def test_silver_labels_follow_the_code_counterparts() -> None:
@@ -86,7 +88,7 @@ def test_silver_labels_need_feedback_and_expected_calls() -> None:
 
 
 def test_silver_items_label_only_runs_with_labels() -> None:
-    """A run without counterpart feedback is not an item; ids carry the run id prefix."""
+    """A run without counterpart feedback is not an item."""
     items = silver_items(
         [
             _stored({"tool_correctness": 1.0}, expected_calls=0),
@@ -94,8 +96,18 @@ def test_silver_items_label_only_runs_with_labels() -> None:
         ]
     )
     assert [(i.item_id, i.source, dict(i.labels)) for i in items] == [
-        ("P3-01#01234567", "silver", {"tool_selection": True})
+        ("P3-01#a1b2c3d4e5f6", "silver", {"tool_selection": True})
     ]
+
+
+def test_silver_item_ids_stay_unique_for_runs_made_together() -> None:
+    """UUIDv7 run ids made close together share their first digits, never their tail."""
+    runs = [
+        "019a1f08-0b2c-7d3e-8f40-a1b2c3d4e5f6",
+        "019a1f08-0b2d-7a11-9c22-0f1e2d3c4b5a",
+    ]
+    items = silver_items([_stored({}, run_id=run) for run in runs])
+    assert len({item.item_id for item in items}) == 2
 
 
 def test_base_turns_take_the_first_fully_passing_run_per_case() -> None:
