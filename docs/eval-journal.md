@@ -11,6 +11,57 @@ don't know the project; the evidence line at the end points to the experiments b
 
 ---
 
+## The grader approved every extra step the agent could explain afterwards
+
+_2026-11-23_
+
+The suite has an automated grader for wasted effort: did the agent make lookups it didn't
+need? It is itself an AI model reading the agent's work, so before trusting it we tested
+it. We took conversations where we already knew the answer and checked whether the grader
+agreed.
+
+On made-up mistakes it was perfect. We copied good conversations and added an obviously
+pointless step, the same lookup twice in a row, and it caught every one. On real mistakes
+it failed. An earlier experiment with a bigger model had made an extra order lookup on
+four questions, every time it was asked them. The grader let 16 of those 20 conversations
+pass.
+
+Its reasoning was always the same: "the agent used the result in its answer, so the
+lookup was needed". That was exactly the rule we had written. But an agent can always
+mention something it looked up. Here it repeated item names and prices the first lookup
+had already returned, or added a shipping date the customer never asked about. The rule
+let any extra step pass once the agent had found a use for it.
+
+We rewrote the rule: a lookup counts only if it brought information the question needed
+and nothing earlier had already given. On the same conversations the grader then caught
+15 of the 20 extra lookups. It still passed the conversations it had always passed, and
+still caught every planted repeat.
+
+The last 5 were all the same question, "Can I still cancel this order?". Here the grader
+was right and our expected answer was wrong. The agent's instructions say to warn the
+customer when an order is stuck, but the tool that checks whether an order can be
+cancelled doesn't say whether it is stuck. A second lookup was the only way to follow the
+instructions. The fix belongs in that tool, not in the grader.
+
+**Lessons:**
+- Test an AI grader on real mistakes, not only on made-up ones. Obvious planted
+  mistakes are easy to catch, so they tell you little about how good it is.
+- When a grader is wrong in the same way every time, check the rule you gave it first. It
+  may be following that rule exactly.
+- When the grader and the expected answer disagree, either one can be wrong. Here the
+  disagreement pointed at a gap in one of the agent's tools.
+
+_Evidence: `trajectory_efficiency` calibrated on `claude-sonnet-5-5-full-a2b65ba9`
+(`evals.calibrate`, 1 verdict per item; extra calls labelled from the call count): rubric
+v1 passed 16 of 20 runs with more calls than expected (TNR 0.20, κ 0.23), all on P1-01,
+P4-01, P5-01 and P6-01; rubric v2 failed 15 of 20 (TNR 0.75, κ 0.78), and the remaining
+5 are P1-01, where `check_cancellation_eligibility` returns no `is_stuck`. Planted repeats
+caught 6 of 6 with both versions. On `claude-haiku-5-5-full-baa6c0ac` v2 kept all 42 real
+runs passing and caught 14 of 14 planted repeats. Small samples; one judge verdict per
+item._
+
+---
+
 ## The customer said "the jeans". The agent asked "which jeans?"
 
 _2026-11-18_

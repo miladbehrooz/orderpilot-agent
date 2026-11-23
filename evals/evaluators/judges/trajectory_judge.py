@@ -5,11 +5,10 @@ from datetime import datetime
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
-from langsmith.evaluation.evaluator import EvaluationResult
-from langsmith.schemas import Example, Run
 from openevals.trajectory.llm import create_trajectory_llm_as_judge
 
 from evals.evaluators.judges.llm_judge import JudgeVerdict, LLMJudgeEvaluator
+from evals.evaluators.turn import Turn
 
 
 class TrajectoryJudgeEvaluator(LLMJudgeEvaluator):
@@ -58,18 +57,18 @@ class TrajectoryJudgeEvaluator(LLMJudgeEvaluator):
         """
         return JudgeVerdict(reasoning=raw["comment"] or "", verdict=bool(raw["score"]))
 
-    def evaluate(self, run: Run, example: Example) -> list[EvaluationResult]:
-        """Ask the judge whether the turn's trajectory passes this metric's rubric.
+    def _variables(self, turn: Turn) -> dict[str, Any]:
+        """Return the turn and the agent's contract for the prompt.
 
         Args:
-            run: The target run; ``outputs["messages"]`` is this turn, in OpenAI format.
-            example: The example (unused: the judge needs no reference).
+            turn: The turn; its ``messages`` (OpenAI format) are graded. The reference is
+                never used.
 
         Returns:
-            One pass/fail result with the judge's reasoning as its comment.
+            ``outputs`` (the messages, which openevals formats into the prompt) and
+            ``contract``.
         """
-        messages = (run.outputs or {}).get("messages", [])
-        return [self._result(self._ask(outputs=messages, contract=self.contract))]
+        return {"outputs": list(turn.messages), "contract": self.contract}
 
 
 __all__ = ["TrajectoryJudgeEvaluator"]

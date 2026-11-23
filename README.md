@@ -162,6 +162,14 @@ Each case is one question from an already-verified customer. The report is print
 overall numbers are attached to the experiment in LangSmith. `sync` and `run` refuse to
 start if the database was built with a different `--today` than the dataset expects.
 
+To check how far the LLM judges can be trusted, grade a stored experiment again (no agent
+runs, nothing written to LangSmith) against the code metrics' verdicts and against failing
+turns built on purpose:
+```bash
+uv run python -m evals.calibrate --experiment <experiment name> --dry-run   # counts and cost
+uv run python -m evals.calibrate --experiment <experiment name>             # TPR, TNR, κ, flips
+```
+
 ## Development
 
 ```bash
@@ -182,7 +190,8 @@ uv run pre-commit install                       # run the checks on every commit
 **Next: evaluation**
 - [x] Reference-free LLM judges of the trajectory: tool selection, argument quality, efficiency
 - [ ] Reference-free LLM judges of the answer: task completion, faithfulness to tool results
-- [ ] Calibrate every judge (agreement, κ) on the hand-written cases, failing runs built on purpose and human labels, before it gates anything
+- [x] Calibration tooling: each judge's agreement (TPR, TNR, κ, flip rate) with the code metrics' labels and with failing turns built on purpose
+- [ ] Calibrate every judge with human labels and its own dataset, before it gates anything
 - [ ] Safety gates in code: no data leaks, no internal IDs, auth before data, prompt-injection cases
 - [ ] Multi-turn conversations with a simulated customer
 - [ ] Smoke evals in CI on every pull request

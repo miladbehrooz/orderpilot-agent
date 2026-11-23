@@ -34,7 +34,7 @@ class Evaluator(ABC):
 
     Subclasses set ``key`` (and ``kind``) and implement :meth:`evaluate`. Families of
     metrics have their own base next to the library they wrap: ``LLMJudgeEvaluator``
-    (``llm_judge.py``) and ``TrajectoryMatchEvaluator`` (``trajectory.py``).
+    (``judges/llm_judge.py``) and ``TrajectoryMatchEvaluator`` (``code/trajectory_match.py``).
 
     Attributes:
         key: Name of the metric: its feedback key, and the key in ``EvaluatorFactory``.

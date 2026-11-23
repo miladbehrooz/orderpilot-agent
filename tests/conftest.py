@@ -1,4 +1,4 @@
-"""Shared fixtures: a stub repository, a small test shop database and the real database."""
+"""Shared fixtures: stub repository, test shop, real database, LangSmith run builders."""
 
 import os
 import sqlite3
@@ -12,6 +12,7 @@ from pytest_mock import MockerFixture
 from orderpilot.domain import User
 from orderpilot.repository import SqliteOrderRepository
 from orderpilot.settings import settings
+from tests.eval_runs import ExampleFactory, RunFactory, build_example, build_run
 from tests.shop_data import ShopData, build_shop_db
 from tests.stubs import StubRepository, verification_details
 
@@ -134,3 +135,24 @@ def known_user(sqlite_repo: SqliteOrderRepository) -> User:
     user = sqlite_repo.find_user_by_email(email)
     assert user is not None
     return user
+
+
+@pytest.fixture
+def make_run() -> RunFactory:
+    """Return a builder of target runs.
+
+    Returns:
+        ``make_run(answer=..., error=..., messages=...)`` building a real LangSmith ``Run``.
+    """
+    return build_run
+
+
+@pytest.fixture
+def make_example() -> ExampleFactory:
+    """Return a builder of dataset examples.
+
+    Returns:
+        ``make_example(metrics=..., expected_tool_calls=..., expected_reason_code=...)``
+        building a real LangSmith ``Example``.
+    """
+    return build_example
