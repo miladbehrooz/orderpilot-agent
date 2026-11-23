@@ -7,11 +7,13 @@ from contextlib import closing
 from datetime import timedelta
 
 import pytest
+from pytest_mock import MockerFixture
 
 from orderpilot.domain import OrderStatus
 from orderpilot.repository import SqliteOrderRepository
 from orderpilot.services import eligibility as service
 from orderpilot.services.results import ReasonCode, ToolResult
+from orderpilot.settings import settings
 from tests.shop_data import ShopData
 
 Check = Callable[[SqliteOrderRepository, int, int], ToolResult]
@@ -47,6 +49,64 @@ def test_shipped_order_cannot_be_cancelled(
     )
     assert (result.reason_code, result.eligible) == (ReasonCode.ALREADY_SHIPPED, False)
     assert result.shipped_on == (shop.today - timedelta(days=2)).date()
+
+
+def test_cancellation_check_flags_a_stuck_order(
+    shop_repo: SqliteOrderRepository, shop: ShopData
+) -> None:
+    """Processing for longer than ``STUCK_DAYS`` is flagged, and the order can still be cancelled.
+
+    Args:
+        shop_repo: Repository on the test shop.
+        shop: Test shop ids.
+    """
+    result = service.check_cancellation_eligibility(shop_repo, shop.customer_id, shop.orders.stuck)
+    assert (result.reason_code, result.eligible) == (ReasonCode.ELIGIBLE, True)
+    assert (result.is_stuck, result.is_possibly_lost, result.days_in_status) == (True, False, 400)
+
+
+def test_recent_processing_order_is_not_stuck(
+    shop_repo: SqliteOrderRepository, shop: ShopData
+) -> None:
+    """Two days in Processing is not stuck.
+
+    Args:
+        shop_repo: Repository on the test shop.
+        shop: Test shop ids.
+    """
+    result = service.check_cancellation_eligibility(
+        shop_repo, shop.customer_id, shop.orders.processing
+    )
+    assert (result.is_stuck, result.days_in_status) == (False, 2)
+
+
+def test_cancellation_check_flags_a_possibly_lost_order(
+    shop_repo: SqliteOrderRepository, shop: ShopData
+) -> None:
+    """Shipped 60 days ago and never delivered: it can't be cancelled, and may be lost.
+
+    Args:
+        shop_repo: Repository on the test shop.
+        shop: Test shop ids.
+    """
+    result = service.check_cancellation_eligibility(shop_repo, shop.customer_id, shop.orders.lost)
+    assert result.reason_code is ReasonCode.ALREADY_SHIPPED
+    assert (result.is_possibly_lost, result.is_stuck, result.days_in_status) == (True, False, 60)
+
+
+def test_stuck_threshold_comes_from_settings(
+    shop_repo: SqliteOrderRepository, shop: ShopData, mocker: MockerFixture
+) -> None:
+    """With ``STUCK_DAYS`` raised above 400 days, the same order is no longer stuck.
+
+    Args:
+        shop_repo: Repository on the test shop.
+        shop: Test shop ids.
+        mocker: Pytest-mock fixture.
+    """
+    mocker.patch.object(settings, "STUCK_DAYS", 500)
+    result = service.check_cancellation_eligibility(shop_repo, shop.customer_id, shop.orders.stuck)
+    assert result.is_stuck is False
 
 
 def test_recent_delivery_is_returnable_with_refund(

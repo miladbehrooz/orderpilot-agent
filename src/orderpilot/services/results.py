@@ -222,6 +222,10 @@ class CancellationResult(ToolResult):
         created_on: Order date.
         shipped_on: Ship date, if shipped.
         delivered_on: Delivery date, if delivered.
+        days_in_status: Calendar days since the order entered its current status.
+        is_stuck: Processing for longer than ``STUCK_DAYS`` (Q1). A stuck order can still
+            be cancelled.
+        is_possibly_lost: Shipped longer than ``LOST_DAYS`` ago without delivery (Q2).
     """
 
     order_id: int | None = None
@@ -230,6 +234,9 @@ class CancellationResult(ToolResult):
     created_on: date | None = None
     shipped_on: date | None = None
     delivered_on: date | None = None
+    days_in_status: int | None = None
+    is_stuck: bool | None = None
+    is_possibly_lost: bool | None = None
 
 
 class ItemReturnView(ShowsNulls):

@@ -34,7 +34,8 @@ def make_check_cancellation_eligibility(repo: OrderRepository) -> BaseTool:
 
         Only checks; it does not cancel anything. Returns eligible and a reason_code
         (ELIGIBLE, ALREADY_SHIPPED, ALREADY_RETURNED, ORDER_CANCELLED or NOT_FOUND),
-        with the order's status and dates.
+        with the order's status and dates, days_in_status, and the flags is_stuck /
+        is_possibly_lost.
 
         Args:
             order_id: The order to check.

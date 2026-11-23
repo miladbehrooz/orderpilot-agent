@@ -79,6 +79,27 @@ def test_user_id_comes_from_state(shop_repo: SqliteOrderRepository, shop: ShopDa
     assert as_owner["reason_code"] == "ELIGIBLE"
 
 
+def test_cancellation_check_shows_the_stuck_flag(
+    shop_repo: SqliteOrderRepository, shop: ShopData
+) -> None:
+    """The model sees ``is_stuck`` and the days in status, so it needs no second lookup.
+
+    Args:
+        shop_repo: Repository on the test shop.
+        shop: Test shop ids.
+    """
+    args = {"order_id": shop.orders.stuck}
+    content = run_tool_call(
+        shop_repo, "check_cancellation_eligibility", args, user_id=shop.customer_id
+    )
+    assert content["reason_code"] == "ELIGIBLE"
+    assert (content["is_stuck"], content["is_possibly_lost"], content["days_in_status"]) == (
+        True,
+        False,
+        400,
+    )
+
+
 def test_return_check_for_one_item(shop_repo: SqliteOrderRepository, shop: ShopData) -> None:
     """A verified call for one item returns that item's decision as JSON.
 

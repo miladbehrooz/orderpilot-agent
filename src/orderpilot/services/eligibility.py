@@ -30,13 +30,16 @@ def check_cancellation_eligibility(
         order_id: The order to check.
 
     Returns:
-        The decision with the order's status and dates, or ``NOT_FOUND`` if the order
-        doesn't exist or belongs to someone else (rule 4).
+        The decision with the order's status, dates, days in status and stuck/lost flags
+        (the same as in the order summary, so the agent needs no second lookup to flag a
+        stuck or lost order), or ``NOT_FOUND`` if the order doesn't exist or belongs to
+        someone else (rule 4).
     """
     order = repo.get_order(user_id, order_id)
     if order is None:
         return CancellationResult(reason_code=ReasonCode.NOT_FOUND)
     decision = policy.cancel_decision(order)
+    today = repo.reference_now()
     return CancellationResult(
         reason_code=decision.reason_code,
         order_id=order.order_id,
@@ -45,6 +48,9 @@ def check_cancellation_eligibility(
         created_on=order.created_at.date(),
         shipped_on=None if order.shipped_at is None else order.shipped_at.date(),
         delivered_on=None if order.delivered_at is None else order.delivered_at.date(),
+        days_in_status=policy.days_in_status(order, today),
+        is_stuck=policy.is_stuck(order, today),
+        is_possibly_lost=policy.is_possibly_lost(order, today),
     )
 
 
