@@ -1,4 +1,6 @@
-"""Silver labels: the code counterparts' feedback becomes the judges' expected verdicts."""
+"""Silver labels: the code counterparts become the judges' expected verdicts."""
+
+from typing import Any
 
 import pytest
 
@@ -8,20 +10,33 @@ from evals.evaluators import Turn
 
 
 def _stored(
-    feedback: dict[str, float], expected_calls: int = 1, case_id: str = "P3-01"
+    feedback: dict[str, float],
+    expected_calls: int = 1,
+    calls: int = 1,
+    case_id: str = "P3-01",
 ) -> StoredTurn:
-    """Build a stored run with the given feedback.
+    """Build a stored run with the given feedback and number of tool calls.
 
     Args:
         feedback: Feedback key to score.
         expected_calls: Number of expected tool calls in the reference.
+        calls: Number of tool calls the turn makes.
         case_id: The run's case.
 
     Returns:
         The stored run.
     """
     expected = [{"name": "check_return_eligibility", "args": {}}] * expected_calls
-    turn = Turn("Can I return order 7?", "Yes.", (), {"expected_tool_calls": expected})
+    messages: list[dict[str, Any]] = [{"role": "user", "content": "Can I return order 7?"}]
+    for index in range(calls):
+        function = {"name": "check_return_eligibility", "arguments": '{"order_id": 7}'}
+        call = {"type": "function", "id": f"call-{index}", "function": function}
+        messages += [
+            {"role": "assistant", "content": "", "tool_calls": [call]},
+            {"role": "tool", "tool_call_id": f"call-{index}", "content": '{"reason_code": "OK"}'},
+        ]
+    messages.append({"role": "assistant", "content": "Yes."})
+    turn = Turn("Can I return order 7?", "Yes.", tuple(messages), {"expected_tool_calls": expected})
     return StoredTurn(case_id=case_id, run_id="0123456789abcdef", turn=turn, feedback=feedback)
 
 
@@ -42,29 +57,42 @@ def test_silver_labels_follow_the_code_counterparts() -> None:
     }
 
 
-@pytest.mark.parametrize(("steps", "efficient"), [(1.0, True), (2.0, True), (3.0, False)])
+@pytest.mark.parametrize(("calls", "efficient"), [(1, True), (2, True), (3, False)])
 def test_efficiency_label_allows_up_to_the_expected_number_of_calls(
-    steps: float, efficient: bool
+    calls: int, efficient: bool
 ) -> None:
     """Fewer calls than expected are not inefficient; more are.
 
     Args:
-        steps: The run's ``step_count``.
+        calls: Tool calls the turn makes.
         efficient: The expected ``trajectory_efficiency`` label.
     """
-    stored = _stored({"step_count": steps}, expected_calls=2)
+    stored = _stored({}, expected_calls=2, calls=calls)
     assert silver_labels(stored) == {"trajectory_efficiency": efficient}
+
+
+def test_efficiency_label_counts_the_turn_not_the_feedback() -> None:
+    """Calls are counted from the turn, so runs recorded before ``step_count`` get the label.
+
+    A stale or missing ``step_count`` score doesn't change it.
+    """
+    assert silver_labels(_stored({}, calls=2)) == {"trajectory_efficiency": False}
+    assert silver_labels(_stored({"step_count": 1.0}, calls=2)) == {"trajectory_efficiency": False}
 
 
 def test_silver_labels_need_feedback_and_expected_calls() -> None:
     """Without counterpart feedback, or without expected calls to count against, no label."""
-    assert silver_labels(_stored({})) == {}
-    assert silver_labels(_stored({"step_count": 1.0}, expected_calls=0)) == {}
+    assert silver_labels(_stored({}, expected_calls=0)) == {}
 
 
 def test_silver_items_label_only_runs_with_labels() -> None:
     """A run without counterpart feedback is not an item; ids carry the run id prefix."""
-    items = silver_items([_stored({"tool_correctness": 1.0}), _stored({"answer_correctness": 1.0})])
+    items = silver_items(
+        [
+            _stored({"tool_correctness": 1.0}, expected_calls=0),
+            _stored({"answer_correctness": 1.0}, expected_calls=0),
+        ]
+    )
     assert [(i.item_id, i.source, dict(i.labels)) for i in items] == [
         ("P3-01#01234567", "silver", {"tool_selection": True})
     ]

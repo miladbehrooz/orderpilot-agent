@@ -1,9 +1,9 @@
-"""Labelled turns: the verdict each judge should give, from the code metrics' feedback.
+"""Labelled turns: the verdict each judge should give, from the code metrics.
 
-The code counterparts' feedback on stored runs gives *silver* labels (``docs/evals.md``,
-section 6). A disagreement between a judge and its silver label is a lead for review, not
-a judge error by itself: a different path can be equally valid, and the reference can be
-the one that's wrong.
+The code counterparts on stored runs give *silver* labels (``docs/evals.md``, section 6).
+A disagreement between a judge and its silver label is a lead for review, not a judge error
+by itself: a different path can be equally valid, and the reference can be the one that's
+wrong.
 """
 
 from collections.abc import Mapping, Sequence
@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from evals.calibration.stored import StoredTurn
+from evals.evaluators.messages import tool_calls
 from evals.evaluators.turn import Turn
 
 LabelSource = Literal["silver", "built"]
@@ -42,9 +43,13 @@ def silver_labels(stored: StoredTurn) -> dict[str, bool]:
 
     - ``tool_selection`` follows ``tool_correctness``;
     - ``argument_quality`` follows ``argument_correctness``;
-    - ``trajectory_efficiency`` passes when ``step_count`` is at most the number of
-      expected tool calls. Fewer calls are not inefficient: a missing call fails
+    - ``trajectory_efficiency`` passes when the turn makes at most as many tool calls as
+      the reference expects. Fewer calls are not inefficient: a missing call fails
       ``tool_selection`` instead.
+
+    The tool calls are counted from the stored turn, as ``step_count`` counts them, so
+    experiments recorded before ``step_count`` existed get this label too. The other two
+    need the reference matcher, so they come from the run's feedback.
 
     ``answer_correctness`` has no code counterpart, so it gets no silver label.
 
@@ -52,7 +57,8 @@ def silver_labels(stored: StoredTurn) -> dict[str, bool]:
         stored: The stored run with its feedback.
 
     Returns:
-        Judge metric to label, for each counterpart that has feedback on the run.
+        Judge metric to label, for each counterpart that has feedback on the run (or, for
+        ``trajectory_efficiency``, whose reference expects tool calls).
     """
     feedback = stored.feedback
     labels: dict[str, bool] = {}
@@ -61,8 +67,8 @@ def silver_labels(stored: StoredTurn) -> dict[str, bool]:
     if "argument_correctness" in feedback:
         labels["argument_quality"] = feedback["argument_correctness"] == 1
     expected_calls = len(stored.turn.reference.get("expected_tool_calls", []))
-    if "step_count" in feedback and expected_calls:
-        labels["trajectory_efficiency"] = feedback["step_count"] <= expected_calls
+    if expected_calls:
+        labels["trajectory_efficiency"] = len(tool_calls(stored.turn.messages)) <= expected_calls
     return labels
 
 

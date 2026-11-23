@@ -298,7 +298,7 @@ Every judge metric (`answer_correctness` and the step 3 judges) is calibrated be
    | `trajectory_efficiency` | `step_count` against the number of expected tool calls |
    | `faithfulness`, `answer_correctness` | none: human labels only |
 
-   These are *silver* labels. A disagreement goes to human review and is not counted against the judge automatically: a different path can be equally valid, and the reference can be the one that's wrong. `trajectory_efficiency` passes when `step_count` is at most the number of expected calls: fewer calls fail `tool_selection`, not efficiency.
+   These are *silver* labels. A disagreement goes to human review and is not counted against the judge automatically: a different path can be equally valid, and the reference can be the one that's wrong. `trajectory_efficiency` passes when the turn makes at most as many tool calls as expected: fewer calls fail `tool_selection`, not efficiency. Calibration counts the calls from the stored turn (as `step_count` does), so experiments recorded before `step_count` existed get this label too.
 2. **Failing turns built on purpose.** The hand-written cases mostly pass, so on their own they can't show how often a judge catches a failure (TNR). Failing turns are made by changing passing ones: drop the eligibility call but keep the decision, swap the `order_id`, check every item in P8, make the answer contradict the tool's `reason_code`, repeat a lookup. Each change has a known label.
 3. **Human labels** in a LangSmith **annotation queue**, under separate keys (`<metric>_human`): the disagreements from 1, a sample of the agreements, and runs of reference-free cases.
 
@@ -310,7 +310,7 @@ Every judge metric (`answer_correctness` and the step 3 judges) is calibrated be
 ### How 3b-1 is built (done): silver labels and built failures
 `evals/calibrate.py` with the `evals/calibration/` package. Sources 1 and 2 above, no human labels yet (3b-2).
 
-1. **Stored turns** (`calibration/stored.py`): one query, `client.datasets.experiment_runs.query`, returns the experiment's examples with their runs, each run's outputs and its `feedback_stats` (the code metrics' scores). Errored runs are left out. The experiment's `reference_now` must match the local database, because the judges see TODAY and the contract built from it.
+1. **Stored turns** (`calibration/stored.py`): one query, `client.datasets.experiment_runs.query`, returns the experiment's examples with their runs, each run's outputs and its `feedback_stats` (the `tool_correctness` and `argument_correctness` scores used as labels). Errored runs are left out. The experiment's `reference_now` must match the local database, because the judges see TODAY and the contract built from it.
 2. **Silver items** (`calibration/labels.py`): each stored run labelled by its code counterparts (table above). `answer_correctness` has no counterpart and gets no silver label.
 3. **Built failures** (`calibration/mutations.py`): per case, the first run that passes every silver label is the base, and each mutation that fits it is applied. A mutation breaks one metric (label `False`) and **keeps** the metrics it doesn't touch, which carry the base's label: a judge that fails those is grading outside its rubric.
 
