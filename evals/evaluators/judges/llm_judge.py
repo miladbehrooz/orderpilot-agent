@@ -1,16 +1,19 @@
 """LLM-judge base: a versioned prompt run by an openevals judge, with a pass/fail verdict."""
 
+from abc import abstractmethod
 from collections.abc import Callable
 from datetime import datetime
 from typing import Any, ClassVar
 
 from langchain_core.language_models import BaseChatModel
 from langsmith.evaluation.evaluator import EvaluationResult
+from langsmith.schemas import Example, Run
 from openevals.llm import create_llm_as_judge
 from pydantic import BaseModel, Field
 
 from evals.evaluators.base import Evaluator
 from evals.evaluators.judges.prompts import prompt_for
+from evals.evaluators.turn import Turn
 
 
 class JudgeVerdict(BaseModel):
@@ -27,6 +30,11 @@ class JudgeVerdict(BaseModel):
 
 class LLMJudgeEvaluator(Evaluator):
     """Base for LLM-judge evaluators: a versioned prompt run by an openevals judge.
+
+    :meth:`grade` asks the judge about one :class:`~evals.evaluators.turn.Turn`, without the
+    shared applicability and error policy; calibration calls it directly. A subclass sets
+    ``key`` and ``prompt_version`` and says which prompt variables a turn fills
+    (:meth:`_variables`).
 
     Args:
         judge: The judge chat model (from ``build_judge``); it must support structured output.
@@ -45,6 +53,40 @@ class LLMJudgeEvaluator(Evaluator):
         super().__init__()
         self.today = reference_now.date().isoformat()
         self._judge = self._make_judge(judge, prompt_for(self.key, self.prompt_version))
+
+    def evaluate(self, run: Run, example: Example) -> list[EvaluationResult]:
+        """Ask the judge whether the run passes this metric's rubric.
+
+        Args:
+            run: The target run.
+            example: The dataset example.
+
+        Returns:
+            One pass/fail result with the judge's reasoning as its comment.
+        """
+        return [self._result(self.grade(Turn.from_langsmith(run, example)))]
+
+    def grade(self, turn: Turn) -> JudgeVerdict:
+        """Ask the judge for its verdict on one turn.
+
+        Args:
+            turn: The turn to grade.
+
+        Returns:
+            The judge's verdict.
+        """
+        return self._ask(**self._variables(turn))
+
+    @abstractmethod
+    def _variables(self, turn: Turn) -> dict[str, Any]:
+        """Return the values of the prompt's placeholders for one turn, other than ``today``.
+
+        Args:
+            turn: The turn to grade.
+
+        Returns:
+            Placeholder name to value.
+        """
 
     def _make_judge(self, judge: BaseChatModel, prompt: str) -> Callable[..., Any]:
         """Build the openevals judge that runs the prompt.

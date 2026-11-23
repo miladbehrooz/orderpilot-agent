@@ -6,10 +6,9 @@ The code-graded metrics run on hand-built turns (the trajectory metrics with the
 openevals matcher).
 """
 
-from collections.abc import Callable, Sequence
-from datetime import UTC, datetime
+from collections.abc import Sequence
+from datetime import datetime
 from typing import Any
-from uuid import uuid4
 
 import pytest
 from langchain_core.language_models import BaseChatModel
@@ -21,7 +20,6 @@ from langchain_core.messages import (
     convert_to_openai_messages,
 )
 from langsmith.evaluation.evaluator import run_evaluator
-from langsmith.schemas import Example, Run
 from pydantic import ValidationError
 from pytest_mock import MockerFixture, MockType
 
@@ -45,102 +43,8 @@ from evals.evaluators import factory as factory_module
 from evals.evaluators.judges import llm_judge as llm_judge_module
 from evals.evaluators.judges import trajectory_judge as trajectory_judge_module
 from evals.evaluators.judges.prompts import JUDGE_PROMPTS, JudgePrompt, prompt_for
+from tests.eval_runs import ExampleFactory, RunFactory
 from tests.stubs import StubRepository
-
-RunFactory = Callable[..., Run]
-ExampleFactory = Callable[..., Example]
-
-
-@pytest.fixture
-def make_run() -> RunFactory:
-    """Return a builder of target runs.
-
-    Returns:
-        ``make_run(answer=..., error=...)`` building a real LangSmith ``Run``.
-    """
-
-    def _make(
-        answer: str = "Yes, until 2026-12-04.",
-        error: str | None = None,
-        messages: list[dict[str, Any]] | None = None,
-    ) -> Run:
-        """Build a target run.
-
-        Args:
-            answer: The agent's final answer.
-            error: The run's error, if it failed.
-            messages: The turn in OpenAI format (see ``turn``); empty if omitted.
-
-        Returns:
-            The run.
-        """
-        run_id = uuid4()
-        outputs = {"answer": answer, "messages": messages or []}
-        return Run.model_validate(
-            {
-                "id": run_id,
-                "trace_id": run_id,
-                "name": "invoke",
-                "run_type": "chain",
-                "start_time": datetime(2026, 11, 16, tzinfo=UTC),
-                "inputs": {},
-                "outputs": None if error else outputs,
-                "error": error,
-            }
-        )
-
-    return _make
-
-
-@pytest.fixture
-def make_example() -> ExampleFactory:
-    """Return a builder of dataset examples.
-
-    Returns:
-        ``make_example(metrics=..., expected_tool_calls=..., expected_reason_code=...)``
-        building a real LangSmith ``Example``.
-    """
-
-    def _make(
-        metrics: list[str] | None = None,
-        expected_tool_calls: list[dict[str, Any]] | None = None,
-        expected_reason_code: str = "ELIGIBLE",
-    ) -> Example:
-        """Build an example for a P3-style case.
-
-        Args:
-            metrics: Metrics listed in the example metadata.
-            expected_tool_calls: Expected calls as ``{"name", "args"}`` dicts; by default
-                one ``check_return_eligibility`` call for order 7.
-            expected_reason_code: Code ``check_return_eligibility`` must return.
-
-        Returns:
-            The example.
-        """
-        if expected_tool_calls is None:
-            expected_tool_calls = [{"name": "check_return_eligibility", "args": {"order_id": 7}}]
-        return Example.model_validate(
-            {
-                "id": uuid4(),
-                "inputs": {"customer_email": "a@example.com", "question": "Can I return order 7?"},
-                "outputs": {
-                    "expected_outcome": "Yes, returnable until 2026-12-04.",
-                    "key_facts": {"order_id": 7, "return_deadline": "2026-12-04"},
-                    "expected_tool_calls": expected_tool_calls,
-                    "expected_reason_code": {
-                        "tool": "check_return_eligibility",
-                        "code": expected_reason_code,
-                    },
-                },
-                "metadata": {
-                    "case_id": "P3-01",
-                    "scenario_id": "P3",
-                    "metrics": ["answer_correctness"] if metrics is None else metrics,
-                },
-            }
-        )
-
-    return _make
 
 
 @pytest.fixture

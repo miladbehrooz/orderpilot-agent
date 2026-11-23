@@ -1,6 +1,6 @@
 # E-commerce Support Agent: Evaluation Design (v2)
 
-_2026-11-21. Derived from `scenarios.md` and `tools.md`. Steps 1 and 2 (sections 1–5, 7–9: `answer_correctness`, `tool_correctness`, `argument_correctness`, `reason_code`, `step_count`) and step 3a (the trajectory judges `tool_selection`, `argument_quality`, `trajectory_efficiency`) are implemented. v2 changes the strategy to a hybrid one (principle 1): reference-free LLM judges become the primary quality metrics, and the hand-written references are kept for regression and judge calibration. Judge calibration (section 6, step 3b), the answer judges (step 3c) and later steps are not implemented yet._
+_2026-11-21. Derived from `scenarios.md` and `tools.md`. Steps 1 and 2 (sections 1–5, 7–9: `answer_correctness`, `tool_correctness`, `argument_correctness`, `reason_code`, `step_count`) step 3a (the trajectory judges `tool_selection`, `argument_quality`, `trajectory_efficiency`) and step 3b-1 (calibration on silver labels and built failures, `calibrate.py`) are implemented. v2 changes the strategy to a hybrid one (principle 1): reference-free LLM judges become the primary quality metrics, and the hand-written references are kept for regression and judge calibration. Human labels and judge datasets (section 6, step 3b-2), the answer judges (step 3c) and later steps are not implemented yet._
 
 ## Principles
 1. **Hybrid grading: three kinds of check, each where it fits.**
@@ -138,12 +138,18 @@ class LLMJudgeEvaluator(
     prompt_version: ClassVar[str]
 
     def __init__(self, judge: BaseChatModel, reference_now: datetime) -> None: ...
+    def evaluate(self, run, example):  # [result of self.grade(Turn.from_langsmith(run, example))]
+        ...
+    def grade(self, turn: Turn) -> JudgeVerdict: ...  # no policy; calibration calls it directly
+    @abstractmethod
+    def _variables(self, turn: Turn) -> dict[str, Any]: ...  # the prompt's placeholders
     def _make_judge(self, judge, prompt): ...  # default: openevals create_llm_as_judge
     def _verdict(self, raw) -> JudgeVerdict: ...  # reads that judge's output
 
 
 class TrajectoryJudgeEvaluator(LLMJudgeEvaluator):  # judges/trajectory_judge.py: reference-free
     def __init__(self, judge, reference_now, contract: str) -> None: ...
+    def _variables(self, turn): ...  # {"outputs": turn.messages, "contract": ...}
     def _make_judge(self, judge, prompt): ...  # openevals create_trajectory_llm_as_judge
 
 
@@ -176,6 +182,7 @@ class EvaluatorFactory:  # factory.py
 - **Signature `(run, example)`.** LangSmith passes the `Run` and the `Example` when the parameters are named exactly that (it types `example` as optional). We need `run.error` for the error policy and `example.metadata` for applicability. LangSmith names evaluators by `__name__`, which objects lack, so the base class sets `self.__name__ = key`, and **every result sets `key` explicitly**.
 - **The judge is built only when needed.** The factory calls `build_judge()` only if a selected evaluator is an `LLMJudgeEvaluator`, and `agent_contract(repo)` only if one is a `TrajectoryJudgeEvaluator`. Runs with only code-based metrics then work without an OpenAI key.
 - **Own base class, not LangSmith's `RunEvaluator`,** so LangSmith types stay in one adapter and a later move to Langfuse stays cheap.
+- **Judges grade a `Turn`** (`evaluators/turn.py`: question, answer, messages, reference), not a LangSmith `Run`. `evaluate` builds the turn from `(run, example)`; calibration builds turns that never were runs (section 6) and calls `grade` directly.
 
 **Error policy** (in `Evaluator.__call__`, written once)
 
@@ -249,7 +256,12 @@ EVAL_REPEATS=5 uv run python -m evals.run --split full
 - **Calls** `client.evaluate(AgentTarget(repo).invoke, data=examples, evaluators=EvaluatorFactory.build(...), num_repetitions=k, max_concurrency=..., experiment_prefix=..., metadata=..., error_handling="log")`. Importing `evaluate` from `langsmith.evaluation` is deprecated; `client.evaluate` is the current API.
 - **Experiment metadata**, which is what makes comparisons meaningful: `agent_provider`, `agent_model`, `judge_provider`, `judge_model`, `judge_prompts` (version per judge metric), `git_sha` and `git_dirty`, `reference_now`, `repeats`, `split`, `families`.
 - **Exit codes:** 0 success, 1 a gate metric failed, 2 setup or configuration error.
-- **Re-grading without re-running the agent:** `client.evaluate("<experiment id>", evaluators=[...])` scores an existing experiment's stored outputs. Use it after a judge prompt change, or to add a new metric to old runs.
+- **Re-grading without re-running the agent:** `client.evaluate("<experiment id>", evaluators=[...])` scores an existing experiment's stored outputs and writes the feedback to it. Use it after a judge prompt change, or to add a new metric to old runs.
+- **Calibration** (section 6) also grades stored turns again, but locally, writing nothing to LangSmith:
+  ```bash
+  uv run python -m evals.calibrate --experiment <name> --dry-run          # items and judge calls only
+  uv run python -m evals.calibrate --experiment <name> [--metrics tool_selection,...] [--repeats 3] [--out calibration.json]
+  ```
 
 ## 5. Reporting: `report.py`
 After each run, a local summary is built from the result rows (`run`, `example`, `evaluation_results`) that `client.evaluate` returns. Repetitions share an example ID, so they are grouped by it. Runs where a metric didn't apply, or whose evaluator failed, don't count for that metric. Results are read by their evaluator's `kind`: a `measure` keeps its number, everything else is pass/fail.
@@ -286,7 +298,7 @@ Every judge metric (`answer_correctness` and the step 3 judges) is calibrated be
    | `trajectory_efficiency` | `step_count` against the number of expected tool calls |
    | `faithfulness`, `answer_correctness` | none: human labels only |
 
-   These are *silver* labels. A disagreement goes to human review and is not counted against the judge automatically: a different path can be equally valid, and the reference can be the one that's wrong.
+   These are *silver* labels. A disagreement goes to human review and is not counted against the judge automatically: a different path can be equally valid, and the reference can be the one that's wrong. `trajectory_efficiency` passes when `step_count` is at most the number of expected calls: fewer calls fail `tool_selection`, not efficiency.
 2. **Failing turns built on purpose.** The hand-written cases mostly pass, so on their own they can't show how often a judge catches a failure (TNR). Failing turns are made by changing passing ones: drop the eligibility call but keep the decision, swap the `order_id`, check every item in P8, make the answer contradict the tool's `reason_code`, repeat a lookup. Each change has a known label.
 3. **Human labels** in a LangSmith **annotation queue**, under separate keys (`<metric>_human`): the disagreements from 1, a sample of the agreements, and runs of reference-free cases.
 
@@ -294,6 +306,27 @@ Every judge metric (`answer_correctness` and the step 3 judges) is calibrated be
 - **Consistency:** the same stored runs are graded again several times (re-grading, section 4), and the report shows how often verdicts flip. Judge provider, model, temperature and prompt version are fixed per experiment and recorded in its metadata.
 - **Improvement loop:** labelled disagreements become `few_shot_examples` in the next prompt version.
 - **Each judge has its own dataset** (`orderpilot-judge-<metric>`). Inputs are what the judge sees; the expected output is the label; the target is the judge itself. Every prompt change is checked against it before use.
+
+### How 3b-1 is built (done): silver labels and built failures
+`evals/calibrate.py` with the `evals/calibration/` package. Sources 1 and 2 above, no human labels yet (3b-2).
+
+1. **Stored turns** (`calibration/stored.py`): one query, `client.datasets.experiment_runs.query`, returns the experiment's examples with their runs, each run's outputs and its `feedback_stats` (the code metrics' scores). Errored runs are left out. The experiment's `reference_now` must match the local database, because the judges see TODAY and the contract built from it.
+2. **Silver items** (`calibration/labels.py`): each stored run labelled by its code counterparts (table above). `answer_correctness` has no counterpart and gets no silver label.
+3. **Built failures** (`calibration/mutations.py`): per case, the first run that passes every silver label is the base, and each mutation that fits it is applied. A mutation breaks one metric (label `False`) and **keeps** the metrics it doesn't touch, which carry the base's label: a judge that fails those is grading outside its rubric.
+
+   | Mutation | Change | Breaks | Keeps |
+   |---|---|---|---|
+   | `drop_eligibility_call` | remove the eligibility call, its result and the AI message that made it; keep the answer | `tool_selection` | `argument_quality`, `trajectory_efficiency` |
+   | `swap_order_id` | `order_id + 1` in every call; results unchanged | `argument_quality` | `tool_selection`, `trajectory_efficiency` |
+   | `check_every_item` | `order_item_ids` = every item `get_order_details` returned (P8) | `argument_quality` | `tool_selection`, `trajectory_efficiency` |
+   | `repeat_call` | the last call and its result again, with new call ids | `trajectory_efficiency` | `tool_selection`, `argument_quality` |
+   | `contradict_decision` | answer states the opposite of `expected_reason_code` | `answer_correctness` | the three trajectory judges |
+
+   Each mutation is unit-tested against the real code counterpart it breaks (`tool_correctness`, `argument_correctness`, `step_count`), so "fail by construction" is the same check the experiments run.
+4. **Grading** (`calibration/grading.py`): every labelled metric of every item is graded `--repeats` times (odd, default 3) through `LLMJudgeEvaluator.grade`, in parallel up to `EVAL_MAX_CONCURRENCY`. A failed judge call is counted as an error, and a grade with an error is left out of the agreement.
+5. **Report** (`calibration/report.py`, `stats.py`): per judge and label source (`silver`, `built`, `all`), the confusion counts of the majority verdicts, TPR and TNR with 95% Wilson intervals, Cohen's κ with a seeded bootstrap 95% interval, the flip rate across repeats, and every disagreement with the judge's reasoning (built failures first). `--out` writes every grade as JSON, the input for the 3b-2 annotation queue.
+
+What the numbers can and can't say: silver labels are almost all pass, so they give TPR but little TNR and an undefined κ; built failures give TNR. `answer_correctness` gets only TNR until human labels arrive. On m1 this is about 42 silver and 46 built items, about 270 judge calls per repeat.
 
 ## 7. Configuration
 Eval-only settings live in `evals/settings.py`: `EvalSettings(BaseSettings)` with `env_prefix="EVAL_"`, the same `.env` file (`PROJECT_ROOT / ".env"`), and the `eval_settings` singleton.
@@ -318,6 +351,7 @@ Tests live in `tests/`, use pytest-mock, and never call a real LLM:
 - **Trajectory metrics:** the real openevals matcher on hand-built OpenAI-format turns: missing, extra and reordered calls, wrong and extra arguments, strict values, the comment.
 - **`reason_code` and `step_count`:** expected and other codes, the last result after a retry, other tools' results ignored, no result, unreadable content; tool and model calls counted; no measure on an errored run.
 - **Trajectory judges** (step 3a): openevals' trajectory judge is mocked; checks that the judge receives exactly `today`, `contract` and the turn and nothing from the reference or metadata, the score and comment mapping, the shared error policy, that every v1 prompt fills, the LangSmith contract, and that the factory builds the contract once, only for trajectory judges.
+- **Calibration** (step 3b-1): each mutation breaks its real code counterpart and leaves the base turn untouched; silver labels and base turns; Wilson, κ and its bootstrap on hand-computed tables; majority verdicts, flips and errors; stored-run loading with a mocked client; the command with mocked judges (`--dry-run` builds none).
 - **`agent_contract`** (no mocks): it holds the rendered system prompt and every tool with its parameters, and no injected `runtime`.
 - **Dataset checks:** unknown metrics, missing required reference fields, unknown tools and arguments (including injected ones such as `runtime`), unknown reason codes and reason codes from unknown tools are refused.
 - **Target:** only this turn's messages are returned.
@@ -338,7 +372,7 @@ evals/
 ├── sync.py                  # repo → LangSmith upsert
 ├── target.py                # AgentTarget, seed_verified_thread, verified_history
 ├── evaluators/              # grouped by grader type; base.py (Evaluator, error policy), factory.py,
-│   │                        # messages.py (turn readers); one module per metric
+│   │                        # turn.py (Turn), messages.py (turn readers); one module per metric
 │   ├── code/                # trajectory_match.py (TrajectoryMatchEvaluator), tool_correctness,
 │   │                        # argument_correctness, reason_code, step_count
 │   └── judges/              # llm_judge.py (LLMJudgeEvaluator), trajectory_judge.py
@@ -347,7 +381,9 @@ evals/
 │                            # argument_quality, trajectory_efficiency
 ├── run.py                   # client.evaluate() entrypoint
 ├── report.py                # pass rate, pass^k, flaky, measures, latency; attaches experiment feedback
-└── calibrate.py             # (step 3, not yet) judge agreement with labels
+├── calibrate.py             # judge agreement with labels: python -m evals.calibrate
+└── calibration/             # stored.py (stored turns), labels.py (silver labels), mutations.py
+                             # (built failures), grading.py, stats.py (Wilson, kappa), report.py
 ```
 **Dependencies:** the `evals` dependency group (`langsmith`, `openevals`, `pyyaml`, `types-PyYAML`), installed by default. These are declared explicitly even where they arrive indirectly. Step 2 needs no new dependency: trajectory match is in `openevals.trajectory`.
 
@@ -358,7 +394,7 @@ The full list of planned metrics, grouped by dimension, is in [`metrics.md`](met
 |---|---|
 | **1** | Pipeline end to end, `answer_correctness`, report (P plus L1, L3, L5, L6). Done |
 | **2** | Reference-based trajectory and decisions (code): `tool_correctness`, `argument_correctness` (openevals trajectory match), `reason_code`, and the reference-free `step_count` (measure). Done |
-| 3 | Reference-free judges and calibration, run next to the reference-based metrics on m1 (section 3). **3a, done:** `tool_selection`, `argument_quality`, `trajectory_efficiency` and the agent's contract. **3b:** calibration of every judge, `answer_correctness` included (section 6: built failures, annotation queue, `calibrate.py`, judge datasets). **3c:** `task_completion`, `faithfulness` |
+| 3 | Reference-free judges and calibration, run next to the reference-based metrics on m1 (section 3). **3a, done:** `tool_selection`, `argument_quality`, `trajectory_efficiency` and the agent's contract. **3b:** calibration of every judge, `answer_correctness` included (section 6). **3b-1, done:** silver labels, built failures, `calibrate.py`. **3b-2:** annotation queue and human labels, judge datasets. **3c:** `task_completion`, `faithfulness` |
 | 4 | Code invariants and behaviour: leak scan and the other gates (`kind="gate"`), `grounded_facts`; clarification and refusal rubrics (AM, L2, S); AU with unverified starts. New cases are reference-free unless a regression case is needed |
 | 5 | Multi-turn: openevals simulated user (AU3, AM1 follow-ups), graded by the reference-free judges over the whole conversation |
 | M2 | DB-state grading on a fresh DB copy per example (W1–W8) |
@@ -373,6 +409,7 @@ The full list of planned metrics, grouped by dimension, is in [`metrics.md`](met
   - Summary evaluators get `(runs, examples)` without feedback.
   - `list_examples` filters by `splits` and `metadata`.
   - `create_feedback` accepts `project_id` for experiment-level feedback.
+  - (checked 2026-11-23) `list_runs()` and `get_experiment_results()` are deprecated, to be removed after 2027-01-31. Their replacement for an experiment, `client.datasets.experiment_runs.query(dataset_id, experiment_ids=[...], selects=[...])`, returns examples with their runs and is an **async** resource even on the sync `Client` (`async for row in ...`). `selects` takes `OUTPUTS`, `ERROR` and `FEEDBACK_STATS` (per key `avg`, the score for a single feedback); without `selects` only ids come back. The experiment's metadata is in `read_project(...).extra["metadata"]`.
 - **langgraph 1.2.22:**
   - Input keys outside `input_schema` are dropped.
   - `update_state` without `as_node` on a fresh thread drops them too; with `as_node="agent"` the values are kept.

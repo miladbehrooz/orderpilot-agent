@@ -13,6 +13,7 @@ from evals.evaluators.judges.llm_judge import JudgeVerdict, LLMJudgeEvaluator
 from evals.evaluators.judges.tool_selection import ToolSelectionEvaluator
 from evals.evaluators.judges.trajectory_efficiency import TrajectoryEfficiencyEvaluator
 from evals.evaluators.judges.trajectory_judge import TrajectoryJudgeEvaluator
+from evals.evaluators.turn import Turn
 
 __all__ = [
     "AnswerCorrectnessEvaluator",
@@ -30,4 +31,5 @@ __all__ = [
     "TrajectoryEfficiencyEvaluator",
     "TrajectoryJudgeEvaluator",
     "TrajectoryMatchEvaluator",
+    "Turn",
 ]

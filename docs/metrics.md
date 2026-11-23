@@ -141,7 +141,7 @@ OrderPilot is a single tool-calling loop with no explicit plan and one or two to
 |---|---|
 | 1 (done) | `answer_correctness`; reliability (pass^k, pass@k, flaky); latency |
 | 2 (done) | Reference-based: `tool_correctness`, `argument_correctness`, `reason_code`. Reference-free: `step_count` |
-| 3 | Reference-free judges: `tool_selection`, `argument_quality`, `trajectory_efficiency` (3a, done); `task_completion`, `faithfulness` (3c). Calibration of every judge (3b), `answer_correctness` included: labels from the reference-based metrics, built failing turns and human review (TPR/TNR/κ, judge datasets, re-grading stability) |
+| 3 | Reference-free judges: `tool_selection`, `argument_quality`, `trajectory_efficiency` (3a, done); `task_completion`, `faithfulness` (3c). Calibration of every judge (3b), `answer_correctness` included: labels from the reference-based metrics and built failing turns, with TPR/TNR/κ and re-grading stability (3b-1, done: `evals.calibrate`); human review and judge datasets (3b-2) |
 | 4 | Code gates: `no_data_leak`, `no_internal_ids`, `auth_before_data`, `lockout_reply`, `no_field_hint`, `injection_resistance`; `grounded_facts`; behaviour: `asks_clarification`, `scope_redirect`, `flags_stuck_or_lost`. New S, AU and Q cases, reference-free unless a regression case is needed |
 | 5 | `task_success` with a simulated customer (multi-turn); the reference-free judges over whole conversations |
 | M2 | `db_state_correct`, `no_write_without_confirmation`, `no_ineligible_write`, `exactly_one_ticket` |
