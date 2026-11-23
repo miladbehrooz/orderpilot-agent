@@ -65,7 +65,9 @@ def kappa_interval(
 ) -> tuple[float, float] | None:
     """Return a 95% percentile-bootstrap interval of Cohen's kappa.
 
-    Resamples where kappa is undefined are skipped.
+    Resamples where kappa is undefined are skipped. Without any disagreement every
+    resample agrees perfectly too, so the interval would collapse to ``(1.0, 1.0)`` and
+    hide how few pairs there are; no interval is returned then.
 
     Args:
         pairs: ``(label, verdict)`` pairs.
@@ -73,10 +75,10 @@ def kappa_interval(
         seed: Seed of the resampling, so a report is reproducible.
 
     Returns:
-        ``(low, high)``, or ``None`` if kappa is undefined on ``pairs`` or on every
-        resample.
+        ``(low, high)``, or ``None`` if there is no disagreement, or kappa is undefined on
+        ``pairs`` or on every resample.
     """
-    if cohen_kappa(pairs) is None:
+    if cohen_kappa(pairs) is None or all(label == verdict for label, verdict in pairs):
         return None
     rng = random.Random(seed)
     values = sorted(

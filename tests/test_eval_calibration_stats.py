@@ -86,6 +86,29 @@ def test_kappa_interval_is_reproducible_and_contains_kappa() -> None:
     assert interval[0] <= kappa <= interval[1]
 
 
+def test_perfect_agreement_has_kappa_but_no_interval() -> None:
+    """Without a disagreement every resample agrees too, so no collapsed interval is given."""
+    pairs = [(True, True)] * 34 + [(False, False)] * 12
+    assert cohen_kappa(pairs) == 1.0
+    assert kappa_interval(pairs) is None
+
+
+def test_single_verdicts_have_no_flip_rate() -> None:
+    """With one verdict per item nothing can flip, so the flip rate is not reported as 0%."""
+    grades = [_grade(True, (True,)), _grade(False, (False,))]
+    row = agreement(grades, "tool_selection", "all")
+    assert (row.flip_rate, row.kappa, row.kappa_ci) == (None, 1.0, None)
+    report = summarize(
+        grades,
+        experiment="exp",
+        judge={"provider": "openai"},
+        prompt_versions={"tool_selection": "v1"},
+        repeats=1,
+    )
+    (all_row,) = [line for line in format_report(report).splitlines() if " all " in line]
+    assert all_row.split()[-3:] == ["1.00", "n/a", "0"]
+
+
 def test_grade_uses_the_majority_verdict_and_notices_flips() -> None:
     """Two passes of three is a pass that flipped; incomplete grades are not complete."""
     grade = _grade(label=False, verdicts=(True, False, True))

@@ -221,6 +221,7 @@ __marimo__/
 
 # OrderPilot
 data/
+calibration*.json
 *.sqlite
 *.sqlite3
 .DS_Store

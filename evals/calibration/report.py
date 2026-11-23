@@ -65,7 +65,8 @@ class Agreement:
         tnr: True-negative rate, or ``None`` without fail labels.
         kappa: Cohen's kappa, or ``None`` if undefined.
         kappa_ci: Bootstrap 95% interval of kappa, or ``None``.
-        flip_rate: Share of items whose verdicts differed across repeats.
+        flip_rate: Share of items whose verdicts differed across repeats; ``None`` with a
+            single verdict per item, where nothing can flip.
         errors: Grades left out because a judge call failed.
     """
 
@@ -142,6 +143,7 @@ def agreement(grades: Sequence[Grade], metric: str, source: ReportSource) -> Agr
     fn = sum(label and not verdict for label, verdict in pairs)
     tn = sum(not label and not verdict for label, verdict in pairs)
     fp = sum(not label and verdict for label, verdict in pairs)
+    repeated = [g for g in complete if len(g.verdicts) > 1]
     return Agreement(
         metric=metric,
         source=source,
@@ -154,7 +156,7 @@ def agreement(grades: Sequence[Grade], metric: str, source: ReportSource) -> Agr
         tnr=Rate.of(tn, tn + fp),
         kappa=cohen_kappa(pairs),
         kappa_ci=kappa_interval(pairs),
-        flip_rate=sum(g.flipped for g in complete) / len(complete) if complete else None,
+        flip_rate=sum(g.flipped for g in repeated) / len(repeated) if repeated else None,
         errors=len(selected) - len(complete),
     )
 
