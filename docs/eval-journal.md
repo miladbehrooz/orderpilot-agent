@@ -43,6 +43,13 @@ customer when an order is stuck, but the tool that checks whether an order can b
 cancelled doesn't say whether it is stuck. A second lookup was the only way to follow the
 instructions. The fix belongs in that tool, not in the grader.
 
+So we fixed the tool: it now says whether an order is stuck or may be lost. In a new run
+of the bigger model, the agent answered the cancellation question with a single lookup
+every time, and still warned that the order was stuck. The grader agreed with every
+label in that run. The other extra lookups are still there: the agent looks up an order's
+details after checking a return, though the return check already lists the items. That
+one is the agent's habit, not a gap in a tool, and the grader now catches it every time.
+
 **Lessons:**
 - Test an AI grader on real mistakes, not only on made-up ones. Obvious planted
   mistakes are easy to catch, so they tell you little about how good it is.
@@ -57,8 +64,12 @@ v1 passed 16 of 20 runs with more calls than expected (TNR 0.20, κ 0.23), all o
 P4-01, P5-01 and P6-01; rubric v2 failed 15 of 20 (TNR 0.75, κ 0.78), and the remaining
 5 are P1-01, where `check_cancellation_eligibility` returns no `is_stuck`. Planted repeats
 caught 6 of 6 with both versions. On `claude-haiku-5-5-full-baa6c0ac` v2 kept all 42 real
-runs passing and caught 14 of 14 planted repeats. Small samples; one judge verdict per
-item._
+runs passing and caught 14 of 14 planted repeats. After `check_cancellation_eligibility`
+started returning `is_stuck` / `is_possibly_lost`, `claude-sonnet-5-5-full-00585d03`
+(P family, 5 runs each): P1-01 made one call in 5 of 5 runs, mentioned the stuck order in
+5 of 5 and passed `answer_correctness` in 5 of 5; the extra `get_order_details` stayed on
+P4-01, P5-01 and P6-01 (15 of 15 runs), and v2 agreed with all 50 silver labels
+(TNR 15 of 15). Small samples; one judge verdict per item._
 
 ---
 
