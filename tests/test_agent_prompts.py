@@ -45,3 +45,14 @@ def test_prompt_requires_eligibility_tools_and_forbids_claiming_actions(today: d
     assert "check_cancellation_eligibility" in prompt
     assert "check_return_eligibility" in prompt
     assert "Never say it has been done" in prompt
+
+
+def test_prompt_says_the_eligibility_result_needs_no_extra_lookup(today: datetime) -> None:
+    """A whole-order eligibility question takes one tool call; details only for one item.
+
+    Args:
+        today: Reference time.
+    """
+    prompt = render_system_prompt(today)
+    assert "For a question about a whole order, call only the eligibility" in prompt
+    assert "Use `get_order_details` before it only to find a single item" in prompt

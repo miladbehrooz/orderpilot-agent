@@ -36,8 +36,10 @@ The stuck/lost flags and day counts come from pure functions in `src/orderpilot/
 
 Both eligibility tools only check; they never change an order. Their decisions come from `cancel_decision` / `return_decision` in `src/orderpilot/policy.py`, which the Milestone 2 write tools re-run before writing (rule 7). There is no `explanation` text: the tools return codes and facts, and the LLM explains them.
 
+**Order facts.** Next to its decision, each eligibility tool returns the order's facts, the same as in the order summary: `order_id`, `status`, `created_on`, `shipped_on`, `delivered_on`, `days_in_status` and `is_stuck` / `is_possibly_lost` (`OrderCheckResult`). So the agent can explain the decision, and flag a stuck or possibly lost order, without a second lookup. They are left out on `NOT_FOUND`.
+
 ### 4. `check_cancellation_eligibility(order_id)`
-- Returns `reason_code`, `eligible`, `order_id`, `status`, `created_on`, `shipped_on`, `delivered_on`, and the same `days_in_status` and `is_stuck` / `is_possibly_lost` as the order summary, so the agent can flag a stuck or lost order without a second lookup.
+- Returns `reason_code`, `eligible` and the order facts.
 - Only Processing orders can be cancelled (a stuck one too). Codes by status:
 
   | Status | `reason_code` |
@@ -57,7 +59,7 @@ Both eligibility tools only check; they never change an order. Their decisions c
   3. Not delivered (Processing, Shipped, or no delivery date) → `NOT_DELIVERED`
   4. More than `RETURN_WINDOW_DAYS` calendar days since delivery → `WINDOW_EXPIRED`. Day 30 is still eligible, day 31 is not; `return_deadline = delivered_on + 30 days`.
   5. Otherwise → `ELIGIBLE`
-- Top level: `order_id`, `eligible` (any item eligible), `refund_total` (sum over eligible items) and a `reason_code` that is `ELIGIBLE` if any item is eligible, otherwise the code the items share (or the first item's, if they differ).
+- Top level: `eligible` (any item eligible), `refund_total` (sum over eligible items), a `reason_code` that is `ELIGIBLE` if any item is eligible, otherwise the code the items share (or the first item's, if they differ), and the order facts. With them a `NOT_DELIVERED` answer can tell an order still in Processing (it could be cancelled instead) from one on its way, without calling `get_order_details`.
 - `NOT_FOUND` with nothing checked if the order isn't the customer's, or if any requested item is not in that order (`detail` lists those ids). This matches the all-or-nothing behaviour of `return_items`. An empty `order_item_ids` list is `INVALID_ARGUMENTS`.
 - Scenarios: P3–P8
 
