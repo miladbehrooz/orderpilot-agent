@@ -175,6 +175,55 @@ def test_order_cannot_be_returned(
     assert {i.reason_code for i in result.items} == {code}
 
 
+def test_return_check_shows_the_order_status_and_dates(
+    shop_repo: SqliteOrderRepository, shop: ShopData
+) -> None:
+    """A shipped order can't be returned yet, and the result says it is on its way.
+
+    Args:
+        shop_repo: Repository on the test shop.
+        shop: Test shop ids.
+    """
+    result = service.check_return_eligibility(shop_repo, shop.customer_id, shop.orders.shipped)
+    assert result.reason_code is ReasonCode.NOT_DELIVERED
+    assert result.status is OrderStatus.SHIPPED
+    assert result.shipped_on == (shop.today - timedelta(days=2)).date()
+    assert (result.delivered_on, result.days_in_status) == (None, 2)
+    assert (result.is_stuck, result.is_possibly_lost) == (False, False)
+
+
+@pytest.mark.parametrize(
+    ("order", "stuck", "lost", "days"),
+    [
+        pytest.param("stuck", True, False, 400, id="stuck-in-processing"),
+        pytest.param("lost", False, True, 60, id="possibly-lost"),
+    ],
+)
+def test_return_check_flags_stuck_and_lost_orders(
+    shop_repo: SqliteOrderRepository,
+    shop: ShopData,
+    order: str,
+    stuck: bool,
+    lost: bool,
+    days: int,
+) -> None:
+    """Neither order is delivered, and the result carries the flag the answer must mention.
+
+    Args:
+        shop_repo: Repository on the test shop.
+        shop: Test shop ids.
+        order: Name of the order in ``shop.orders``.
+        stuck: Expected ``is_stuck``.
+        lost: Expected ``is_possibly_lost``.
+        days: Expected ``days_in_status``.
+    """
+    result = service.check_return_eligibility(
+        shop_repo, shop.customer_id, getattr(shop.orders, order)
+    )
+    assert result.reason_code is ReasonCode.NOT_DELIVERED
+    assert (result.is_stuck, result.is_possibly_lost, result.days_in_status) == (stuck, lost, days)
+
+
 def test_single_item_of_multi_item_order(shop_repo: SqliteOrderRepository, shop: ShopData) -> None:
     """Checking just one item of a two-item order returns that item only.
 
@@ -245,6 +294,7 @@ def test_unknown_item_id_fails_whole_call(shop_repo: SqliteOrderRepository, shop
     )
     assert result.reason_code is ReasonCode.NOT_FOUND
     assert result.items is None
+    assert (result.order_id, result.status, result.is_stuck) == (None, None, None)
     assert result.detail is not None and str(other_orders_item) in result.detail
 
 

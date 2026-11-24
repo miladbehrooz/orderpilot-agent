@@ -1,5 +1,6 @@
 """Eligibility tools through a real ToolNode: auth guard, user_id from state, argument errors."""
 
+from datetime import timedelta
 from typing import Any
 
 import pytest
@@ -98,6 +99,26 @@ def test_cancellation_check_shows_the_stuck_flag(
         False,
         400,
     )
+
+
+def test_return_check_shows_the_order_status(
+    shop_repo: SqliteOrderRepository, shop: ShopData
+) -> None:
+    """The model sees the order's status and ship date, so it needs no second lookup.
+
+    Args:
+        shop_repo: Repository on the test shop.
+        shop: Test shop ids.
+    """
+    content = run_tool_call(
+        shop_repo,
+        "check_return_eligibility",
+        {"order_id": shop.orders.shipped},
+        user_id=shop.customer_id,
+    )
+    assert (content["reason_code"], content["status"]) == ("NOT_DELIVERED", "Shipped")
+    assert content["shipped_on"] == (shop.today - timedelta(days=2)).date().isoformat()
+    assert "delivered_on" not in content
 
 
 def test_return_check_for_one_item(shop_repo: SqliteOrderRepository, shop: ShopData) -> None:

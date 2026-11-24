@@ -209,34 +209,45 @@ class OrderDetailsResult(ToolResult):
     order: OrderDetails | None = None
 
 
-class CancellationResult(ToolResult):
-    """Result of ``check_cancellation_eligibility`` (P1, P2). It only checks; it never cancels.
+class OrderCheckResult(ToolResult):
+    """The order facts both eligibility checks return next to their decision.
 
-    ``reason_code`` is ``ELIGIBLE`` or the reason it can't be cancelled. All other fields
-    are unset when the order was not found.
+    They are the same facts as in the order summary, so the agent can explain a decision,
+    and flag a stuck or possibly lost order, without a second lookup. All fields are unset
+    when the order was not found.
 
     Attributes:
         order_id: The order checked.
-        status: Its status, which decides eligibility (only Processing can be cancelled).
-        eligible: Whether the order can be cancelled.
+        status: Its status.
         created_on: Order date.
         shipped_on: Ship date, if shipped.
         delivered_on: Delivery date, if delivered.
         days_in_status: Calendar days since the order entered its current status.
-        is_stuck: Processing for longer than ``STUCK_DAYS`` (Q1). A stuck order can still
-            be cancelled.
+        is_stuck: Processing for longer than ``STUCK_DAYS`` (Q1).
         is_possibly_lost: Shipped longer than ``LOST_DAYS`` ago without delivery (Q2).
     """
 
     order_id: int | None = None
     status: OrderStatus | None = None
-    eligible: bool | None = None
     created_on: date | None = None
     shipped_on: date | None = None
     delivered_on: date | None = None
     days_in_status: int | None = None
     is_stuck: bool | None = None
     is_possibly_lost: bool | None = None
+
+
+class CancellationResult(OrderCheckResult):
+    """Result of ``check_cancellation_eligibility`` (P1, P2). It only checks; it never cancels.
+
+    ``reason_code`` is ``ELIGIBLE`` or the reason it can't be cancelled. The status decides
+    it: only Processing can be cancelled, a stuck order too.
+
+    Attributes:
+        eligible: Whether the order can be cancelled; unset when it was not found.
+    """
+
+    eligible: bool | None = None
 
 
 class ItemReturnView(ShowsNulls):
@@ -269,21 +280,21 @@ class ItemReturnView(ShowsNulls):
     return_deadline: date | None = None
 
 
-class ReturnEligibilityResult(ToolResult):
+class ReturnEligibilityResult(OrderCheckResult):
     """Result of ``check_return_eligibility``. It only checks; it never records a return.
 
     ``reason_code`` is ``ELIGIBLE`` if at least one checked item can be returned,
-    otherwise the code the items share (or the first item's, if they differ). All other
-    fields are unset when the order or an item was not found.
+    otherwise the code the items share (or the first item's, if they differ). The order
+    facts tell a ``NOT_DELIVERED`` order still in Processing (it could be cancelled
+    instead) from one on its way (Shipped, and perhaps possibly lost). All other fields
+    are unset when the order or an item was not found.
 
     Attributes:
-        order_id: The order checked.
         eligible: Whether at least one checked item can be returned.
         refund_total: Sum of the refunds of the eligible items.
         items: One decision per checked item.
     """
 
-    order_id: int | None = None
     eligible: bool | None = None
     refund_total: float | None = None
     items: list[ItemReturnView] | None = None
@@ -293,6 +304,7 @@ __all__ = [
     "CancellationResult",
     "ItemReturnView",
     "ItemView",
+    "OrderCheckResult",
     "OrderDetails",
     "OrderDetailsResult",
     "OrderListResult",

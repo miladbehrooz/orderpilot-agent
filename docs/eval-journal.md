@@ -11,6 +11,65 @@ don't know the project; the evidence line at the end points to the experiments b
 
 ---
 
+## We blamed the agent's habit. Half of it was a missing fact
+
+_2026-11-24_
+
+After the fix in the story below, the bigger model still made one lookup too many, on
+three return questions: an order delivered too long ago, one not delivered yet, and one
+that was cancelled. It did so in all 15 runs. We had written it off as a habit: the
+return check already lists the items, yet the agent fetched the full order details as
+well.
+
+The recorded runs showed how the habit worked. The agent asked for both at the same
+time, the return check and the order details, before it had seen either answer. It
+wasn't reacting to something missing from the first result; it had planned the second
+lookup from the start. That is a matter of instructions, so we added one: the
+eligibility result already has what the answer needs, so for a question about a whole
+order, call only that tool. Look up the order's details first only to find a single item.
+
+For one of the three questions that rule alone would have been wrong. "Can I return order
+73008?" gets the answer "not yet, it hasn't been delivered". But the return check didn't
+say whether the order had shipped or was still being packed, and that changes the advice:
+an order still being packed can be cancelled instead, while a shipped one has to arrive
+first. Our own expected answer even said "it shipped on 31 October", a date that only the
+second lookup could provide. The expected answer and the expected steps contradicted each
+other, and the agent had found the only way to satisfy both.
+
+So we fixed both. The return check now also returns the order's status, its dates, and
+whether it looks stuck or lost, the same facts the cancellation check got in the story
+below. The new instruction stops the habit. In a new run of the bigger model, all three
+questions took a single lookup in every run, every answer was still correct, and the
+not-delivered answer still gave the shipping date. The question about a single item ("just
+the jeans") still looked up the order first, as it should. The smaller model's full suite
+passed exactly as before.
+
+**Lessons:**
+- When an agent takes an extra step, ask whether it could have answered without it. If
+  it could, the instructions are the place to fix it. If it couldn't, a tool is missing
+  something. Here one symptom had both causes.
+- A tool should return everything needed to explain its decision. This was the second
+  time a missing fact showed up as an extra lookup, and the grader for wasted steps
+  found both.
+- Check the expected answers against the expected steps. Here the expected answer asked
+  for a fact the expected steps couldn't provide.
+
+_Evidence: cases P4-01, P5-01 and P6-01. Before: `claude-sonnet-5-5-full-00585d03` made
+`check_return_eligibility` and `get_order_details` in the same message in 15 of 15 runs
+(2 tool calls each); P5-01's reference lists `shipped_on: 2026-10-31`, which only
+`get_order_details` returned. After (commit `c3fc1fd`: `check_return_eligibility` returns
+the order facts, and the agent prompt says to call only the eligibility tool for a
+whole-order question): `claude-sonnet-5-5-full-efa0534f` made 1 call in 15 of 15 runs and
+passed every metric in all 50 P-family runs, including `trajectory_efficiency` (v2) and
+`answer_correctness`; P5-01 gave the ship date in 5 of 5. P8-01 still called
+`get_order_details` and then checked item 3862 only. Haiku full suite
+`claude-haiku-5-5-full-3463ec03`: 42 of 42 runs passed every metric, the same as
+`claude-haiku-5-5-full-baa6c0ac`. Small samples. The wrong day count on P4-01 from the
+2026-11-18 story didn't come back, but the new answers give dates instead of a day count,
+so this run can't show it is fixed._
+
+---
+
 ## The grader approved every extra step the agent could explain afterwards
 
 _2026-11-23_

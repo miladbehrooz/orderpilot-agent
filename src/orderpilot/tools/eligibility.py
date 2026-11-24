@@ -72,7 +72,9 @@ def make_check_return_eligibility(repo: OrderRepository) -> BaseTool:
         (ELIGIBLE, NOT_DELIVERED, WINDOW_EXPIRED, ALREADY_RETURNED or ORDER_CANCELLED),
         the refund amount if eligible, and its delivery date, days since delivery and
         return deadline. The top-level reason_code is ELIGIBLE if any item is eligible.
-        NOT_FOUND means the order, or one of the given items, is not in this order.
+        Also returns the order's status and dates, days_in_status, and the flags
+        is_stuck / is_possibly_lost. NOT_FOUND means the order, or one of the given
+        items, is not in this order.
 
         Args:
             order_id: The order to check.

@@ -7,9 +7,11 @@ check; they never change anything.
 """
 
 from collections.abc import Sequence
+from datetime import datetime
+from typing import Any
 
 from orderpilot import policy
-from orderpilot.domain import OrderItem
+from orderpilot.domain import Order, OrderItem
 from orderpilot.repository import OrderRepository
 from orderpilot.services.results import (
     CancellationResult,
@@ -17,6 +19,28 @@ from orderpilot.services.results import (
     ReasonCode,
     ReturnEligibilityResult,
 )
+
+
+def _order_facts(order: Order, today: datetime) -> dict[str, Any]:
+    """Return the order facts both eligibility results carry (``OrderCheckResult``).
+
+    Args:
+        order: The customer's order.
+        today: TODAY, from ``meta.reference_now``.
+
+    Returns:
+        The ``OrderCheckResult`` fields as keyword arguments.
+    """
+    return {
+        "order_id": order.order_id,
+        "status": order.status,
+        "created_on": order.created_at.date(),
+        "shipped_on": None if order.shipped_at is None else order.shipped_at.date(),
+        "delivered_on": None if order.delivered_at is None else order.delivered_at.date(),
+        "days_in_status": policy.days_in_status(order, today),
+        "is_stuck": policy.is_stuck(order, today),
+        "is_possibly_lost": policy.is_possibly_lost(order, today),
+    }
 
 
 def check_cancellation_eligibility(
@@ -39,18 +63,10 @@ def check_cancellation_eligibility(
     if order is None:
         return CancellationResult(reason_code=ReasonCode.NOT_FOUND)
     decision = policy.cancel_decision(order)
-    today = repo.reference_now()
     return CancellationResult(
         reason_code=decision.reason_code,
-        order_id=order.order_id,
-        status=order.status,
         eligible=decision.eligible,
-        created_on=order.created_at.date(),
-        shipped_on=None if order.shipped_at is None else order.shipped_at.date(),
-        delivered_on=None if order.delivered_at is None else order.delivered_at.date(),
-        days_in_status=policy.days_in_status(order, today),
-        is_stuck=policy.is_stuck(order, today),
-        is_possibly_lost=policy.is_possibly_lost(order, today),
+        **_order_facts(order, repo.reference_now()),
     )
 
 
@@ -93,9 +109,12 @@ def check_return_eligibility(
         order_item_ids: Items to check (duplicates are ignored), or ``None`` for all.
 
     Returns:
-        One decision per item with the combined ``reason_code`` and refund total.
+        One decision per item with the combined ``reason_code`` and refund total, and the
+        order's status, dates, days in status and stuck/lost flags (as in the order
+        summary, so the agent needs no second lookup to explain the decision).
         ``NOT_FOUND`` if the order doesn't exist or belongs to someone else (rule 4), or
-        if any requested item is not in this order; then nothing is checked.
+        if any requested item is not in this order; then nothing is checked and nothing
+        about the order is returned.
     """
     order = repo.get_order(user_id, order_id)
     if order is None:
@@ -118,10 +137,10 @@ def check_return_eligibility(
     refunds = [d.refund_amount for d in decisions if d.refund_amount is not None]
     return ReturnEligibilityResult(
         reason_code=policy.overall_return_code(decisions),
-        order_id=order.order_id,
         eligible=any(d.eligible for d in decisions),
         refund_total=round(sum(refunds), 2) if refunds else None,
         items=[_item_view(i, d) for i, d in zip(items, decisions, strict=True)],
+        **_order_facts(order, today),
     )
 
 
